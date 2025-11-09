@@ -30,7 +30,6 @@ import frc.robot.subsystems.VisionSubsystem;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 
 
@@ -222,11 +221,28 @@ private void configureBindings() {
     
     // D-pad Down: Vision test (same as Start)
     joystick.povDown().onTrue(new DriveToAprilTag2Command(drivetrain, visionSubsystem));
+    
+    // D-pad Left: Point all wheels to 0° (forward) - DEBUG: Check encoder offsets
+    joystick.povLeft().onTrue(Commands.runOnce(() -> 
+        System.out.println("[DEBUG] Pointing all wheels to 0° (forward) - Hold D-pad Left to maintain")
+    ));
+    joystick.povLeft().whileTrue(
+        drivetrain.applyRequest(() -> point.withModuleDirection(Rotation2d.fromDegrees(0.0)))
+    );
+    
+    // D-pad Right: Point all wheels to 90° (left) - DEBUG: Check 90° alignment
+    joystick.povRight().onTrue(Commands.runOnce(() -> 
+        System.out.println("[DEBUG] Pointing all wheels to 90° (left) - Hold D-pad Right to maintain")
+    ));
+    joystick.povRight().whileTrue(
+        drivetrain.applyRequest(() -> point.withModuleDirection(Rotation2d.fromDegrees(90.0)))
+    );
 
     System.out.println("[Controller] Professional FRC team layout loaded");
     System.out.println("  Core: LB=Toggle Mode, RB=Brake, A=Cancel, B=Point, Y=Home");
     System.out.println("  Vision: X+Y=Tag2, X+B=Tag1, Y+B=Tag3, X+A=Tag4");
     System.out.println("  Safety: Start=Vision Test, Back=Emergency Home");
+    System.out.println("  Debug: D-pad Left=Wheels to 0°, D-pad Right=Wheels to 90°");
     System.out.println("  Rotation: Left stick = CCW, Right stick = CW");
 }
 

@@ -84,11 +84,13 @@ public class TunerConstants {
     // CAN bus that the devices are located on;
     // All swerve devices must share the same CAN bus
     //public static final CANBus kCANBus = new CANBus("", "./logs/example.hoot");//PRO License allows logging
-    public static final CANBus kCANBus = new CANBus("" );// Use the default CAN bus no PRO
+    public static final CANBus kCANBus = new CANBus("CANivore");// CANivore CAN bus
 
     // Theoretical free speed (m/s) at 12 V applied output;
     // This needs to be tuned to your individual robot
-    public static final LinearVelocity kSpeedAt12Volts = MetersPerSecond.of(4.73);
+    // Reduced to 1.0 m/s for VERY SLOW testing (original was 4.73 m/s)
+    //public static final LinearVelocity kSpeedAt12Volts = MetersPerSecond.of(4.73);
+    public static final LinearVelocity kSpeedAt12Volts = MetersPerSecond.of(1.0);
 
     // Every 1 rotation of the azimuth results in kCoupleRatio drive motor turns;
     // This may need to be tuned to your individual robot
@@ -98,8 +100,8 @@ public class TunerConstants {
     private static final double kSteerGearRatio = 21.428571428571427;
     private static final Distance kWheelRadius = Inches.of(2);
 
-    private static final boolean kInvertLeftSide = true;
-    private static final boolean kInvertRightSide = true;
+    private static final boolean kInvertLeftSide = false; // Changed: was true, testing to fix X-pattern rotation issue
+    private static final boolean kInvertRightSide = false; // Changed: was true, testing to fix X-pattern rotation issue
 
     private static final int kPigeonId = 2;
 
@@ -143,46 +145,49 @@ public class TunerConstants {
     private static final int kFrontLeftDriveMotorId = 8;
     private static final int kFrontLeftSteerMotorId = 7;
     private static final int kFrontLeftEncoderId = 6;
-    private static final Angle kFrontLeftEncoderOffset = Rotations.of(6.185);
-    private static final boolean kFrontLeftSteerMotorInverted = false;
-    private static final boolean kFrontLeftEncoderInverted = true;
+    // OLD: private static final Angle kFrontLeftEncoderOffset = Rotations.of(0.479980);
+    private static final Angle kFrontLeftEncoderOffset = Rotations.of(-0.020020); // Adjusted: 0.479980 - 0.5 to fix gear backwards (180° flip)
+    private static final boolean kFrontLeftSteerMotorInverted = false; // REVERTED: true caused oscillation - motor inversion incompatible
+    private static final boolean kFrontLeftEncoderInverted = true; // REVERTED: false caused ALL wheels to oscillate
 
-    private static final Distance kFrontLeftXPos = Inches.of(-5);   // Was 5, now -5
-    private static final Distance kFrontLeftYPos = Inches.of(5);    // Was 5, stays 5
+    private static final Distance kFrontLeftXPos = Inches.of(11.875);   // 29" robot, 2.625" from edge
+    private static final Distance kFrontLeftYPos = Inches.of(-11.875);   // TEST 1: Negated Y to fix X-pattern (was 11.875)
 
     // Front Right
     private static final int kFrontRightDriveMotorId = 14;
     private static final int kFrontRightSteerMotorId = 13;
     private static final int kFrontRightEncoderId = 5;
-    private static final Angle kFrontRightEncoderOffset = Rotations.of(1.689);
+    // OLD: private static final Angle kFrontRightEncoderOffset = Rotations.of(-0.236816);
+    private static final Angle kFrontRightEncoderOffset = Rotations.of(0.263184); // Adjusted: -0.236816 + 0.5 to fix 180° backwards alignment
     private static final boolean kFrontRightSteerMotorInverted = false;
-    private static final boolean kFrontRightEncoderInverted = true;
+    private static final boolean kFrontRightEncoderInverted = true; // REVERTED: false caused ALL wheels to oscillate
 
-    private static final Distance kFrontRightXPos = Inches.of(5);   // Was 5, stays 5
-    private static final Distance kFrontRightYPos = Inches.of(5);   // Was -5, now 5
+    private static final Distance kFrontRightXPos = Inches.of(11.875);   // 29" robot, 2.625" from edge
+    private static final Distance kFrontRightYPos = Inches.of(11.875);   // TEST 1: Negated Y to fix X-pattern (was -11.875)
 
     // Back Left
     private static final int kBackLeftDriveMotorId = 10;
     private static final int kBackLeftSteerMotorId = 9;
     private static final int kBackLeftEncoderId = 3;
-    private static final Angle kBackLeftEncoderOffset = Rotations.of(5.861);
+    // OLD: private static final Angle kBackLeftEncoderOffset = Rotations.of(0.431396);
+    private static final Angle kBackLeftEncoderOffset = Rotations.of(0.931396); // Adjusted: 0.431396 + 0.5 to fix 180° backwards alignment
     private static final boolean kBackLeftSteerMotorInverted = false;
-    private static final boolean kBackLeftEncoderInverted = true;
+    private static final boolean kBackLeftEncoderInverted = true; // REVERTED: false caused ALL wheels to oscillate
 
-    private static final Distance kBackLeftXPos = Inches.of(5);     // Was -5, now 5
-    private static final Distance kBackLeftYPos = Inches.of(5);     // Was 5, stays 5
+    private static final Distance kBackLeftXPos = Inches.of(-11.875);     // 29" robot, 2.625" from edge
+    private static final Distance kBackLeftYPos = Inches.of(-11.875);    // TEST 1: Negated Y to fix X-pattern (was 11.875)
 
     // Back Right
     private static final int kBackRightDriveMotorId = 12;
     private static final int kBackRightSteerMotorId = 11;
     private static final int kBackRightEncoderId = 4;
-    // was -0.375 (=-135°). Try adding +0.25 (=+90°) → -0.125 (= -45°)
-    private static final Angle kBackRightEncoderOffset = Rotations.of(0.6197);
-    private static final boolean kBackRightSteerMotorInverted = false;
-    private static final boolean kBackRightEncoderInverted = true;
+    // OLD: private static final Angle kBackRightEncoderOffset = Rotations.of(-0.029541);
+    private static final Angle kBackRightEncoderOffset = Rotations.of(-0.404541); // Adjusted: -0.029541 - 0.375 to fix 135° CW rotation
+    private static final boolean kBackRightSteerMotorInverted = false; // REVERTED: true caused oscillation - module physically backwards, needs hardware fix
+    private static final boolean kBackRightEncoderInverted = true; // REVERTED: false caused ALL wheels to oscillate
 
-    private static final Distance kBackRightXPos = Inches.of(-5);   // Was -5, stays -5
-    private static final Distance kBackRightYPos = Inches.of(-5);   // Was -5, stays -5
+    private static final Distance kBackRightXPos = Inches.of(-11.875);   // 29" robot, 2.625" from edge
+    private static final Distance kBackRightYPos = Inches.of(11.875);   // TEST 1: Negated Y to fix X-pattern (was -11.875)
 
 
     public static final SwerveModuleConstants<TalonFXConfiguration, TalonFXConfiguration, CANcoderConfiguration> FrontLeft =

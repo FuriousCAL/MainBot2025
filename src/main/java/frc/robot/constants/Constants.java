@@ -26,10 +26,10 @@ public final class Constants {
         public static final double MASS_KG = 54.0; // 120 lbs
         
         /** Robot wheelbase width in meters */
-        public static final double WHEELBASE_WIDTH_METERS = 0.6096; // 24 inches
+        public static final double WHEELBASE_WIDTH_METERS = 0.60325; // 23.75 inches (29" robot, modules 2.625" from edge)
         
         /** Robot wheelbase length in meters */
-        public static final double WHEELBASE_LENGTH_METERS = 0.6096; // 24 inches
+        public static final double WHEELBASE_LENGTH_METERS = 0.60325; // 23.75 inches (29" robot, modules 2.625" from edge)
     }
 
     // ==========================================================================
@@ -108,7 +108,8 @@ public final class Constants {
     
     public static final class Auto {
         /** Maximum velocity during autonomous in m/s */
-        public static final double MAX_AUTO_VELOCITY_MPS = 3.0;
+        // Reduced to 1.0 m/s for VERY SLOW testing (was 3.0 m/s)
+        public static final double MAX_AUTO_VELOCITY_MPS = 1.0;
         
         /** Maximum acceleration during autonomous in m/s² */
         public static final double MAX_AUTO_ACCELERATION_MPSPS = 2.0;
