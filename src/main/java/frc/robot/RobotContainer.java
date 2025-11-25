@@ -20,6 +20,7 @@ import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import com.pathplanner.lib.config.PIDConstants;
 
 import frc.robot.commands.DriveToAprilTag2Command;
+import frc.robot.commands.DriveToAprilTagOffsetCommand;
 import frc.robot.commands.DriveToHomeCommand;
 import frc.robot.commands.SimpleAutonomousCommand;
 import frc.robot.commands.VisionAssistedAprilTagCommand;
@@ -27,6 +28,7 @@ import frc.robot.constants.AprilTagConstants;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.VisionSubsystem;
+import frc.robot.utils.PoseResetTestUtil;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -63,6 +65,15 @@ public class RobotContainer {
   private final CommandXboxController joystick = new CommandXboxController(0);
 
   private SendableChooser<Command> autoChooser;
+  
+  // ============================================================================
+  // TEST UTILITY: Pose Reset (REMOVE AFTER TESTING)
+  // ============================================================================
+  // This utility allows resetting robot pose via dashboard during testing.
+  // TO REMOVE: Delete PoseResetTestUtil.java and remove the lines below.
+  private PoseResetTestUtil poseResetUtil;
+  // ============================================================================
+  
   // Add a Field-Centric request in parallel to Robot-Centric
   private final SwerveRequest.FieldCentric fieldDrive = new SwerveRequest.FieldCentric()
     .withDeadband(MaxSpeed * 0.1)
@@ -92,6 +103,11 @@ public class RobotContainer {
     // 5) Default teleop drive
     drivetrain.setDefaultCommand(
       drivetrain.applyRequest(() -> {
+         // Don't run default command in test mode
+         if (edu.wpi.first.wpilibj.DriverStation.isTest()) {
+           return brake; // Return brake request in test mode to prevent conflicts
+         }
+         
          // Trigger-based speed scaling
         double precision = 1.0 - 0.7 * joystick.getLeftTriggerAxis();  // 1.0 → 0.3
         double turbo     = 1.0 + 0.5 * joystick.getRightTriggerAxis(); // 1.0 → 1.5
@@ -118,6 +134,9 @@ public class RobotContainer {
               .withRotationalRate(rotationRate);
         }
       })
+      .withName("DefaultTeleopDrive")
+      .beforeStarting(() -> System.out.println("[RobotContainer] Default teleop drive command starting"))
+      .finallyDo((interrupted) -> System.out.println("[RobotContainer] Default teleop drive command ending (interrupted: " + interrupted + ")"))
 
     );
 
@@ -129,6 +148,12 @@ public class RobotContainer {
 
     // 8) Feed telemetry (this updates Field2d via Telemetry.telemeterize)
     drivetrain.registerTelemetry(logger::telemeterize);
+    
+    // ============================================================================
+    // TEST UTILITY: Configure pose reset utility (REMOVE AFTER TESTING)
+    // ============================================================================
+    configurePoseResetTestUtil();
+    // ============================================================================
   }
 
   /**
@@ -302,11 +327,78 @@ private void configureBindings() {
           Commands.waitSeconds(1.0),
           Commands.print("PathPlanner: Simple test complete")
       )
-  );
+    );
 
+    // ============================================================================
+    // VISION TEST AUTONOMOUS COMMANDS
+    // ============================================================================
+    // Tag 2 Tests (PathPlanner with distance offset)
+    autoChooser.addOption("Vision Test: Tag 2 (0.5m)", 
+        new DriveToAprilTagOffsetCommand(drivetrain, 2, 0.5));
+    autoChooser.addOption("Vision Test: Tag 2 (1.0m)", 
+        new DriveToAprilTagOffsetCommand(drivetrain, 2, 1.0));
+    autoChooser.addOption("Vision Test: Tag 2 (1.5m)", 
+        new DriveToAprilTagOffsetCommand(drivetrain, 2, 1.5));
+    autoChooser.addOption("Vision Test: Tag 2 (2.0m)", 
+        new DriveToAprilTagOffsetCommand(drivetrain, 2, 2.0));
+    
+    // Tag 3 Tests (PathPlanner with distance offset)
+    autoChooser.addOption("Vision Test: Tag 3 (0.5m)", 
+        new DriveToAprilTagOffsetCommand(drivetrain, 3, 0.5));
+    autoChooser.addOption("Vision Test: Tag 3 (1.0m)", 
+        new DriveToAprilTagOffsetCommand(drivetrain, 3, 1.0));
+    autoChooser.addOption("Vision Test: Tag 3 (1.5m)", 
+        new DriveToAprilTagOffsetCommand(drivetrain, 3, 1.5));
+    autoChooser.addOption("Vision Test: Tag 3 (2.0m)", 
+        new DriveToAprilTagOffsetCommand(drivetrain, 3, 2.0));
+    
+    // Vision-Assisted Tests (two-phase: PathPlanner + Vision precision)
+    autoChooser.addOption("Vision Test: Tag 2 (Vision-Assisted)", 
+        new VisionAssistedAprilTagCommand(drivetrain, visionSubsystem, 2));
+    autoChooser.addOption("Vision Test: Tag 3 (Vision-Assisted)", 
+        new VisionAssistedAprilTagCommand(drivetrain, visionSubsystem, 3));
+    
+    // Simple PID Tests (for comparison)
+    autoChooser.addOption("Vision Test: Tag 2 (Simple PID)", 
+        new DriveToAprilTag2Command(drivetrain, visionSubsystem));
+
+    System.out.println("[AutoChooser] Added vision test autonomous commands");
   }
 
   public Command getAutonomousCommand() {
     return autoChooser != null ? autoChooser.getSelected() : Commands.none();
   }
+  
+  // ============================================================================
+  // TEST UTILITY: Pose Reset Configuration (REMOVE AFTER TESTING)
+  // ============================================================================
+  /**
+   * Configures the pose reset test utility for dashboard access.
+   * This allows resetting the robot's pose during testing via Shuffleboard/Glass.
+   * 
+   * TO REMOVE: Delete this method and the call to it in the constructor.
+   */
+  private void configurePoseResetTestUtil() {
+    poseResetUtil = new PoseResetTestUtil(drivetrain);
+    
+    // Add a button widget to trigger pose reset
+    SmartDashboard.putData("TEST: Reset Pose to Selected", 
+        Commands.runOnce(() -> {
+          if (poseResetUtil != null) {
+            poseResetUtil.resetToSelectedPose();
+          }
+        }));
+    
+    System.out.println("[PoseResetTest] Pose reset utility configured. Use 'TEST: Reset Robot Pose' chooser and 'TEST: Reset Pose to Selected' button on dashboard.");
+  }
+  
+  /**
+   * Gets the pose reset utility (for external access if needed).
+   * 
+   * @return The pose reset utility, or null if not configured
+   */
+  public PoseResetTestUtil getPoseResetUtil() {
+    return poseResetUtil;
+  }
+  // ============================================================================
 }

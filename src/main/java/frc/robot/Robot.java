@@ -153,11 +153,16 @@ public class Robot extends TimedRobot {
 
     /**
      * Runs when test mode starts.
-     * Cancels all running commands for safety.
+     * Cancels all running commands for safety, including the default teleop command.
      */
     @Override
     public void testInit() {
+        System.out.println("[Robot] testInit: Entering test mode - canceling all commands");
         CommandScheduler.getInstance().cancelAll();
+        // Note: cancelAll() already cancels all commands including default commands
+        // The default command check in RobotContainer will prevent it from running in test mode
+        SmartDashboard.putString("Robot/Mode", "TEST");
+        System.out.println("[Robot] testInit: Test mode initialized - all commands canceled");
     }
 
     /**

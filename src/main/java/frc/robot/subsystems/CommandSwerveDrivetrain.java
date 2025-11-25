@@ -178,11 +178,22 @@ public ChassisSpeeds getRobotRelativeSpeeds() {
 }
 
 public void driveRobotRelative(ChassisSpeeds speeds) {
+    // Log velocity requests for debugging
+    SmartDashboard.putNumber("Drivetrain/RequestedVelocityX", speeds.vxMetersPerSecond);
+    SmartDashboard.putNumber("Drivetrain/RequestedVelocityY", speeds.vyMetersPerSecond);
+    SmartDashboard.putNumber("Drivetrain/RequestedAngularRate", speeds.omegaRadiansPerSecond);
+    
     var request = new SwerveRequest.RobotCentric()
         .withVelocityX(speeds.vxMetersPerSecond)
         .withVelocityY(speeds.vyMetersPerSecond)
         .withRotationalRate(speeds.omegaRadiansPerSecond);
     this.setControl(request);
+    
+    // Log actual speeds after applying
+    var state = this.getState();
+    SmartDashboard.putNumber("Drivetrain/ActualVelocityX", state.Speeds.vxMetersPerSecond);
+    SmartDashboard.putNumber("Drivetrain/ActualVelocityY", state.Speeds.vyMetersPerSecond);
+    SmartDashboard.putNumber("Drivetrain/ActualAngularRate", state.Speeds.omegaRadiansPerSecond);
 }
 
 
@@ -269,6 +280,15 @@ public void driveRobotRelative(ChassisSpeeds speeds) {
                 m_hasAppliedOperatorPerspective = true;
             });
         }
+        
+        // Log drivetrain state for debugging
+        var state = this.getState();
+        SmartDashboard.putNumber("Drivetrain/PoseX", state.Pose.getX());
+        SmartDashboard.putNumber("Drivetrain/PoseY", state.Pose.getY());
+        SmartDashboard.putNumber("Drivetrain/PoseRotation", state.Pose.getRotation().getDegrees());
+        SmartDashboard.putNumber("Drivetrain/ActualVelocityX", state.Speeds.vxMetersPerSecond);
+        SmartDashboard.putNumber("Drivetrain/ActualVelocityY", state.Speeds.vyMetersPerSecond);
+        SmartDashboard.putNumber("Drivetrain/ActualAngularRate", state.Speeds.omegaRadiansPerSecond);
     }
 
     private void startSimThread() {
