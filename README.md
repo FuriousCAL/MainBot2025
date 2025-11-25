@@ -1,7 +1,6 @@
-# MinBot2 - FRC Team Robot Code
+# MainBot2025 - FRC Team Robot Code
 
-Welcome to the MinBot2 robot code repository. This project follows industry best practices adopted from top FRC teams to ensure maintainable, reliable, and professional code.
-
+Welcome to the MainBot2025 robot code repository.
 ## Table of Contents
 
 - [Getting Started](#getting-started)
@@ -25,8 +24,8 @@ Welcome to the MinBot2 robot code repository. This project follows industry best
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/FuriousCAL/MinBot2.git
-cd MinBot2
+git clone https://github.com/FuriousCAL/MainBot2025.git
+cd MainBot2025
 ```
 
 2. Open in VS Code:
