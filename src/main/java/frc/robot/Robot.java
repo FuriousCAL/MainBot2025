@@ -42,7 +42,7 @@ public class Robot extends TimedRobot {
         // Update basic robot telemetry
         updateTelemetry();
         
-        // Update vision pose fusion - this is the missing piece!
+        // Update vision pose fusion
         updateVisionFusion();
     }
 
@@ -50,23 +50,20 @@ public class Robot extends TimedRobot {
      * Updates telemetry data to the dashboard.
      */
     private void updateTelemetry() {
-        double yawDeg = m_robotContainer.drivetrain.getPose().getRotation().getDegrees();
-        SmartDashboard.putNumber("Robot Yaw (degrees)", yawDeg);
+        if (m_robotContainer != null) {
+            double yawDeg = m_robotContainer.drivetrain.getPose().getRotation().getDegrees();
+            SmartDashboard.putNumber("Robot Yaw (degrees)", yawDeg);
+        }
     }
 
     /**
-     * Updates vision pose fusion - the critical missing piece!
-     * This fuses vision measurements with drivetrain odometry for better accuracy.
+     * Updates vision pose fusion.
+     * Delegates to RobotContainer to centralize the logic.
      */
     private void updateVisionFusion() {
-        m_robotContainer.visionSubsystem.getLatestEstimatedPose().ifPresent(estimatedPose -> {
-            // Add vision measurement to drivetrain's pose estimator
-            m_robotContainer.drivetrain.addVisionMeasurement(
-                estimatedPose.estimatedPose.toPose2d(),
-                estimatedPose.timestampSeconds,
-                m_robotContainer.visionSubsystem.getVisionMeasurementStdDevs()
-            );
-        });
+        if (m_robotContainer != null) {
+            m_robotContainer.updateVisionFusion();
+        }
     }
 
     /**

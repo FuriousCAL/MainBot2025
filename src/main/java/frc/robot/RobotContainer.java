@@ -37,7 +37,7 @@ import edu.wpi.first.math.geometry.Translation2d;
 
 public class RobotContainer {
   private final double MaxSpeed = TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
-  private final double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond);
+  private final double MaxAngularRate = RotationsPerSecond.of(0.40).in(RadiansPerSecond);
 
   private final SwerveRequest.RobotCentric drive = new SwerveRequest.RobotCentric()
       .withDeadband(MaxSpeed * 0.1)

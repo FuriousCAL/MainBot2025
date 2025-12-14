@@ -111,9 +111,6 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     /* The SysId routine to test */
     private SysIdRoutine m_sysIdRoutineToApply = m_sysIdRoutineTranslation;
 
-
- 
-
     /**
      * Constructs a CTRE SwerveDrivetrain using the specified constants.
      * <p>
@@ -157,46 +154,6 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
      *                                  and radians
      * @param modules                   Constants for each specific module
      */
-
-
-// Add these methods to CommandSwerveDrivetrain.java
-public Pose2d getPose() {
-    return this.getState().Pose;
-}
-
-public void resetPose(Pose2d pose) {
-    try { 
-        this.setOperatorPerspectiveForward(pose.getRotation()); 
-        this.seedFieldCentric();
-    } catch (Throwable t) {
-        try { this.seedFieldCentric(); } catch (Throwable t2) {}
-    }
-}
-
-public ChassisSpeeds getRobotRelativeSpeeds() {
-    return this.getState().Speeds;
-}
-
-public void driveRobotRelative(ChassisSpeeds speeds) {
-    // Log velocity requests for debugging
-    SmartDashboard.putNumber("Drivetrain/RequestedVelocityX", speeds.vxMetersPerSecond);
-    SmartDashboard.putNumber("Drivetrain/RequestedVelocityY", speeds.vyMetersPerSecond);
-    SmartDashboard.putNumber("Drivetrain/RequestedAngularRate", speeds.omegaRadiansPerSecond);
-    
-    var request = new SwerveRequest.RobotCentric()
-        .withVelocityX(speeds.vxMetersPerSecond)
-        .withVelocityY(speeds.vyMetersPerSecond)
-        .withRotationalRate(speeds.omegaRadiansPerSecond);
-    this.setControl(request);
-    
-    // Log actual speeds after applying
-    var state = this.getState();
-    SmartDashboard.putNumber("Drivetrain/ActualVelocityX", state.Speeds.vxMetersPerSecond);
-    SmartDashboard.putNumber("Drivetrain/ActualVelocityY", state.Speeds.vyMetersPerSecond);
-    SmartDashboard.putNumber("Drivetrain/ActualAngularRate", state.Speeds.omegaRadiansPerSecond);
-}
-
-
     public CommandSwerveDrivetrain(
         SwerveDrivetrainConstants drivetrainConstants,
         double odometryUpdateFrequency,
@@ -208,6 +165,44 @@ public void driveRobotRelative(ChassisSpeeds speeds) {
         if (Utils.isSimulation()) {
             startSimThread();
         }
+    }
+
+    public Pose2d getPose() {
+        return this.getState().Pose;
+    }
+
+    public void resetPose(Pose2d pose) {
+        // NOTE: standard SwerveDrivetrain doesn't expose a way to set arbitrary pose easily
+        // We reset to field centric (0,0,0) and set the operator perspective
+        try { 
+            this.setOperatorPerspectiveForward(pose.getRotation()); 
+            this.seedFieldCentric();
+        } catch (Throwable t) {
+            try { this.seedFieldCentric(); } catch (Throwable t2) {}
+        }
+    }
+
+    public ChassisSpeeds getRobotRelativeSpeeds() {
+        return this.getState().Speeds;
+    }
+
+    public void driveRobotRelative(ChassisSpeeds speeds) {
+        // Log velocity requests for debugging
+        SmartDashboard.putNumber("Drivetrain/RequestedVelocityX", speeds.vxMetersPerSecond);
+        SmartDashboard.putNumber("Drivetrain/RequestedVelocityY", speeds.vyMetersPerSecond);
+        SmartDashboard.putNumber("Drivetrain/RequestedAngularRate", speeds.omegaRadiansPerSecond);
+        
+        var request = new SwerveRequest.RobotCentric()
+            .withVelocityX(speeds.vxMetersPerSecond)
+            .withVelocityY(speeds.vyMetersPerSecond)
+            .withRotationalRate(speeds.omegaRadiansPerSecond);
+        this.setControl(request);
+        
+        // Log actual speeds after applying
+        var state = this.getState();
+        SmartDashboard.putNumber("Drivetrain/ActualVelocityX", state.Speeds.vxMetersPerSecond);
+        SmartDashboard.putNumber("Drivetrain/ActualVelocityY", state.Speeds.vyMetersPerSecond);
+        SmartDashboard.putNumber("Drivetrain/ActualAngularRate", state.Speeds.omegaRadiansPerSecond);
     }
 
     /**
@@ -241,12 +236,7 @@ public void driveRobotRelative(ChassisSpeeds speeds) {
     public Command sysIdDynamic(SysIdRoutine.Direction direction) {
         return m_sysIdRoutineToApply.dynamic(direction);
     }
-    /**
-     * Sets the SysId routine to apply when running SysId tests.
-     * This allows users to switch between translation, steer, and rotation characterization.
-     *
-    @param sysIdRoutine The SysId routine to apply
-     */
+
     /**
      * Resets the drivetrain's odometry to the specified field pose.
      * This method can be called by PathPlanner before starting a new path.
@@ -258,8 +248,6 @@ public void driveRobotRelative(ChassisSpeeds speeds) {
         resetPose(newPose);
         // If additional odometry methods exist (e.g., in the base class), call them here.
     }
-
-
 
     @Override
     public void periodic() {

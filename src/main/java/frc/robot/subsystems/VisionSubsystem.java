@@ -275,8 +275,14 @@ public class VisionSubsystem extends SubsystemBase {
      * @return true if the tag is visible
      */
     public boolean isTagVisible(int tagId) {
-        return getVisibleTargets().stream()
-            .anyMatch(target -> target.getFiducialId() == tagId);
+        // OPTIMIZATION: Use simple loop instead of stream
+        List<PhotonTrackedTarget> targets = getVisibleTargets();
+        for (int i = 0; i < targets.size(); i++) {
+            if (targets.get(i).getFiducialId() == tagId) {
+                return true;
+            }
+        }
+        return false;
     }
     
     /** Cached best target to avoid recomputing every call */

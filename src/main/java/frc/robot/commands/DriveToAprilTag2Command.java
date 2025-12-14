@@ -3,43 +3,39 @@ package frc.robot.commands;
 import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
-import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.constants.AprilTagConstants;
 
-/**
- * Simple command to drive the robot toward AprilTag 2 using vision data.
- * This demonstrates how to use real PhotonVision data to control the simulation robot.
- */
 public class DriveToAprilTag2Command extends Command {
     
     private final CommandSwerveDrivetrain drivetrain;
     private final VisionSubsystem vision;
     
-    // PID controllers for position control
     private final PIDController xController = new PIDController(2.0, 0.0, 0.0);
     private final PIDController yController = new PIDController(2.0, 0.0, 0.0);
     private final PIDController rotationController = new PIDController(3.0, 0.0, 0.0);
     
-    // Target position (AprilTag 2 location)
     private final Pose2d targetPose;
     
-    // Tolerance for "arrived"
+    // FIXED: Increased rotation tolerance from 10 to 30
     private static final double POSITION_TOLERANCE = 0.5; // meters
-    private static final double ROTATION_TOLERANCE = Math.toRadians(10); // degrees
+    private static final double ROTATION_TOLERANCE = Math.toRadians(30); // degrees
+    
+    // NEW: Added timeout mechanism
+    private static final double TIMEOUT = 10.0; // seconds
+    private double startTime;
     
     public DriveToAprilTag2Command(CommandSwerveDrivetrain drivetrain, VisionSubsystem vision) {
         this.drivetrain = drivetrain;
         this.vision = vision;
         
-        // Get AprilTag 2's position from field layout
         this.targetPose = AprilTagConstants.getTagPose(2).orElse(
-            new Pose2d(1.0, 0.0, Rotation2d.fromDegrees(0)) // fallback position
+            new Pose2d(1.0, 0.0, Rotation2d.fromDegrees(0))
         );
         
-        // Add requirements
         addRequirements(drivetrain);
     }
     
@@ -48,42 +44,43 @@ public class DriveToAprilTag2Command extends Command {
         System.out.println("DriveToAprilTag2Command: Starting to drive toward AprilTag 2");
         System.out.println("Target position: " + targetPose);
         
-        // Reset PID controllers
         xController.reset();
         yController.reset();
         rotationController.reset();
+        
+        startTime = Timer.getFPGATimestamp();
     }
     
     @Override
     public void execute() {
-        // Get current robot pose
         Pose2d currentPose = drivetrain.getPose();
         
-        // Calculate errors
         double xError = targetPose.getX() - currentPose.getX();
         double yError = targetPose.getY() - currentPose.getY();
         double rotationError = targetPose.getRotation().minus(currentPose.getRotation()).getRadians();
         
-        // Calculate PID outputs
         double xSpeed = xController.calculate(currentPose.getX(), targetPose.getX());
         double ySpeed = yController.calculate(currentPose.getY(), targetPose.getY());
         double rotationSpeed = rotationController.calculate(currentPose.getRotation().getRadians(), targetPose.getRotation().getRadians());
         
-        // Limit speeds for safety
         xSpeed = Math.max(-1.0, Math.min(1.0, xSpeed));
         ySpeed = Math.max(-1.0, Math.min(1.0, ySpeed));
         rotationSpeed = Math.max(-1.0, Math.min(1.0, rotationSpeed));
         
-        // Drive the robot
-        drivetrain.driveRobotRelative(
-            new edu.wpi.first.math.kinematics.ChassisSpeeds(xSpeed, ySpeed, rotationSpeed)
+        // Convert field-relative PID outputs to robot-relative speeds
+        var fieldRelativeSpeeds = new edu.wpi.first.math.kinematics.ChassisSpeeds(xSpeed, ySpeed, rotationSpeed);
+        var robotRelativeSpeeds = edu.wpi.first.math.kinematics.ChassisSpeeds.fromFieldRelativeSpeeds(
+            fieldRelativeSpeeds, 
+            currentPose.getRotation()
         );
         
-        // Print debug info
-        System.out.printf("DriveToAprilTag2: Current=(%.2f, %.2f, %.1f°), Target=(%.2f, %.2f, %.1f°), Errors=(%.2f, %.2f, %.1f°)\n",
+        drivetrain.driveRobotRelative(robotRelativeSpeeds);
+        
+        System.out.printf("DriveToAprilTag2: Current=(%.2f, %.2f, %.1f), Target=(%.2f, %.2f, %.1f), Errors=(%.2f, %.2f, %.1f), Time=%.1fs\n",
             currentPose.getX(), currentPose.getY(), Math.toDegrees(currentPose.getRotation().getRadians()),
             targetPose.getX(), targetPose.getY(), Math.toDegrees(targetPose.getRotation().getRadians()),
-            xError, yError, Math.toDegrees(rotationError)
+            xError, yError, Math.toDegrees(rotationError),
+            Timer.getFPGATimestamp() - startTime
         );
     }
     
@@ -91,16 +88,21 @@ public class DriveToAprilTag2Command extends Command {
     public boolean isFinished() {
         Pose2d currentPose = drivetrain.getPose();
         
-        // Check if we're close enough to the target
         double xError = Math.abs(targetPose.getX() - currentPose.getX());
         double yError = Math.abs(targetPose.getY() - currentPose.getY());
         double rotationError = Math.abs(targetPose.getRotation().minus(currentPose.getRotation()).getRadians());
         
         boolean atPosition = xError < POSITION_TOLERANCE && yError < POSITION_TOLERANCE;
         boolean atRotation = rotationError < ROTATION_TOLERANCE;
+        boolean timeoutReached = (Timer.getFPGATimestamp() - startTime) > TIMEOUT;
         
         if (atPosition && atRotation) {
             System.out.println("DriveToAprilTag2Command: Arrived at AprilTag 2!");
+            return true;
+        }
+        
+        if (timeoutReached) {
+            System.out.println("DriveToAprilTag2Command: Timeout reached, stopping");
             return true;
         }
         
@@ -109,7 +111,6 @@ public class DriveToAprilTag2Command extends Command {
     
     @Override
     public void end(boolean interrupted) {
-        // Stop the robot
         drivetrain.driveRobotRelative(new edu.wpi.first.math.kinematics.ChassisSpeeds(0, 0, 0));
         
         if (interrupted) {
