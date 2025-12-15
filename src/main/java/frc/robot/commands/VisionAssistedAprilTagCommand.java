@@ -6,7 +6,6 @@ import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
-import edu.wpi.first.math.geometry.Transform2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.trajectory.TrapezoidProfile;
@@ -28,10 +27,10 @@ import com.pathplanner.lib.auto.AutoBuilder;
  * Vision-Assisted AprilTag Navigation Command
  * 
  * This command implements a two-phase approach:
- * 1. Coarse Navigation: Uses PathPlanner to get within ~1-2m of target AprilTag
+ * 1. Coarse Navigation: Uses PathPlanner to get within ~2.0m of target AprilTag
  * 2. Precision Control: Uses real-time vision feedback for exact positioning
  * 
- * Final position: 0.5m directly in front of the specified AprilTag
+ * Final position: 0.25m directly in front of the specified AprilTag
  */
 public class VisionAssistedAprilTagCommand extends Command {
     
@@ -40,10 +39,10 @@ public class VisionAssistedAprilTagCommand extends Command {
     // ==========================================================================
     
     /** Distance to maintain from AprilTag center (meters) */
-    private static final double TARGET_DISTANCE_METERS = 0.5;
+    private static final double TARGET_DISTANCE_METERS = 0.25;
     
     /** Distance threshold to switch from PathPlanner to vision control */
-    private static final double VISION_SWITCH_DISTANCE = 1.5;
+    private static final double VISION_SWITCH_DISTANCE = 2.0;
     
     /** Maximum pose ambiguity to accept for vision control */
     private static final double MAX_VISION_AMBIGUITY = 0.3;
@@ -55,10 +54,10 @@ public class VisionAssistedAprilTagCommand extends Command {
     private static final double VISION_TIMEOUT = 5.0;
     
     /** Position tolerance for completion (meters) */
-    private static final double POSITION_TOLERANCE = 0.05;
+    private static final double POSITION_TOLERANCE = 0.02;
     
     /** Angle tolerance for completion (degrees) */
-    private static final double ANGLE_TOLERANCE = 2.0;
+    private static final double ANGLE_TOLERANCE = 1.0;
     
     // ==========================================================================
     // SUBSYSTEMS AND CONTROLLERS
@@ -87,9 +86,9 @@ public class VisionAssistedAprilTagCommand extends Command {
     private double phaseStartTime;
     
     /** Target pose from field layout (fallback) */
-    private final Pose2d layoutTargetPose;
+    private Pose2d targetPose;
     
-    /** Final target pose (0.5m in front of tag, facing tag) */
+    /** Final target pose (0.25m in front of tag, facing tag) */
     private Pose2d finalTargetPose;
     
     /**
@@ -108,17 +107,18 @@ public class VisionAssistedAprilTagCommand extends Command {
         
         // Get target pose from field layout
         Optional<Pose2d> tagPoseOpt = AprilTagConstants.getTagPose(tagId);
-        this.layoutTargetPose = tagPoseOpt.orElse(AprilTagConstants.FIELD_CENTER);
+        this.targetPose = tagPoseOpt.orElse(AprilTagConstants.FIELD_CENTER);
         
-        // Calculate final target pose (0.5m in front of tag, facing tag)
-        this.finalTargetPose = calculateFinalTargetPose(layoutTargetPose);
+        // Calculate final target pose (0.25m in front of tag, facing tag)
+        this.finalTargetPose = calculateFinalTargetPose(targetPose);
         
         // Create vision controller with appropriate PID gains
+        // These gains are for the final precision approach
         this.visionController = new HolonomicDriveController(
-            new PIDController(3.0, 0.0, 0.0),  // X controller
-            new PIDController(3.0, 0.0, 0.0),  // Y controller
-            new ProfiledPIDController(2.0, 0.0, 0.0,  // Theta controller
-                new TrapezoidProfile.Constraints(6.28, 3.14))  // Max vel: 1 rev/s, Max accel: 0.5 rev/s²
+            new PIDController(2.5, 0.0, 0.0),  // X controller
+            new PIDController(2.5, 0.0, 0.0),  // Y controller
+            new ProfiledPIDController(3.0, 0.0, 0.0,  // Theta controller
+                new TrapezoidProfile.Constraints(4.0, 3.0))  // Max vel: 4 rad/s, Max accel: 3 rad/s²
         );
         
         // Set position and angle tolerances
@@ -140,9 +140,20 @@ public class VisionAssistedAprilTagCommand extends Command {
         phaseStartTime = commandStartTime;
         currentPhase = Phase.PATHPLANNER;
         
+        // Refresh target pose in case field layout changed
+        AprilTagConstants.getTagPose(targetTagId).ifPresent(pose -> {
+            this.targetPose = pose;
+            this.finalTargetPose = calculateFinalTargetPose(pose);
+        });
+        
+        // Calculate an approach position slightly further back for pathfinding
+        // This prevents PathPlanner from trying to drive *through* the tag if starting nearby
+        Pose2d approachPose = calculateApproachPose(targetPose, 1.0); // 1.0m standoff
+        
         // Create PathPlanner command for initial approach
+        // We use the approach pose to ensure we arrive facing the tag
         pathPlannerCommand = AutoBuilder.pathfindToPose(
-            finalTargetPose,
+            approachPose,
             PathPlannerUtils.getDefaultPathConstraints()
         );
         
@@ -153,7 +164,7 @@ public class VisionAssistedAprilTagCommand extends Command {
         SmartDashboard.putString("VisionAssisted/Status", "Starting PathPlanner approach");
         
         System.out.println(String.format(
-            "[VisionAssisted] Starting approach to Tag %d at (%.2f, %.2f)",
+            "[VisionAssisted] Starting approach to Tag %d. Final Target: (%.2f, %.2f)",
             targetTagId, finalTargetPose.getX(), finalTargetPose.getY()
         ));
     }
@@ -182,8 +193,12 @@ public class VisionAssistedAprilTagCommand extends Command {
     
     @Override
     public boolean isFinished() {
-        return currentPhase == Phase.FINISHED || 
-               Timer.getFPGATimestamp() - commandStartTime > (PATHPLANNER_TIMEOUT + VISION_TIMEOUT);
+        // Safety timeout
+        if (Timer.getFPGATimestamp() - commandStartTime > (PATHPLANNER_TIMEOUT + VISION_TIMEOUT + 5.0)) {
+            System.out.println("[VisionAssisted] Global timeout reached");
+            return true;
+        }
+        return currentPhase == Phase.FINISHED;
     }
     
     @Override
@@ -216,21 +231,23 @@ public class VisionAssistedAprilTagCommand extends Command {
      */
     private void executePathPlannerPhase(double phaseElapsedTime) {
         // Continue PathPlanner command
-        pathPlannerCommand.execute();
+        if (pathPlannerCommand != null) {
+            pathPlannerCommand.execute();
+        }
         
-        // Check if we should switch to vision control
+        // Check conditions to switch to vision control
         double distanceToTarget = getDistanceToTarget();
-        boolean hasGoodVision = hasGoodVisionTarget();
         boolean closeEnough = distanceToTarget < VISION_SWITCH_DISTANCE;
-        boolean pathPlannerFinished = pathPlannerCommand.isFinished();
+        boolean pathPlannerFinished = pathPlannerCommand != null && pathPlannerCommand.isFinished();
         boolean pathPlannerTimeout = phaseElapsedTime > PATHPLANNER_TIMEOUT;
         
         SmartDashboard.putNumber("VisionAssisted/Distance to Target", distanceToTarget);
-        SmartDashboard.putBoolean("VisionAssisted/Good Vision", hasGoodVision);
         SmartDashboard.putBoolean("VisionAssisted/PathPlanner Finished", pathPlannerFinished);
         
-        // Switch to vision phase if conditions are met
-        if ((closeEnough && hasGoodVision) || pathPlannerFinished || pathPlannerTimeout) {
+        // Switch if we are close enough OR PathPlanner finished/timed out
+        // We switch even if vision target isn't visible yet - we will assume odometry is good enough
+        // until we pick up the tag
+        if (closeEnough || pathPlannerFinished || pathPlannerTimeout) {
             switchToVisionPhase();
         }
     }
@@ -242,40 +259,46 @@ public class VisionAssistedAprilTagCommand extends Command {
         // Check for vision timeout
         if (phaseElapsedTime > VISION_TIMEOUT) {
             currentPhase = Phase.FINISHED;
-            SmartDashboard.putString("VisionAssisted/Status", "Vision timeout");
+            SmartDashboard.putString("VisionAssisted/Status", "Vision phase timeout");
             return;
         }
         
         // Get current robot pose
         Pose2d currentPose = drivetrain.getPose();
         
-        // Try to get vision-updated target pose
-        Pose2d targetPose = getVisionUpdatedTargetPose().orElse(finalTargetPose);
+        // Update target pose from vision if available (optional refinement)
+        // For now, we trust the AprilTagConstants map and the robot's fused odometry
         
         // Calculate chassis speeds using holonomic controller
         ChassisSpeeds chassisSpeeds = visionController.calculate(
             currentPose,
-            targetPose,
-            0.0,  // No desired velocity
-            targetPose.getRotation()
+            finalTargetPose,
+            0.0,  // No desired velocity at target
+            finalTargetPose.getRotation()
         );
         
-        // Limit maximum speeds for safety during precision control
-        double maxSpeed = 0.5;  // 0.5 m/s max during precision phase
-        chassisSpeeds.vxMetersPerSecond = MathUtil.clamp(chassisSpeeds.vxMetersPerSecond, -maxSpeed, maxSpeed);
-        chassisSpeeds.vyMetersPerSecond = MathUtil.clamp(chassisSpeeds.vyMetersPerSecond, -maxSpeed, maxSpeed);
-        chassisSpeeds.omegaRadiansPerSecond = MathUtil.clamp(chassisSpeeds.omegaRadiansPerSecond, -1.0, 1.0);
+        // Distance-based speed scaling for smooth arrival
+        double distance = currentPose.getTranslation().getDistance(finalTargetPose.getTranslation());
+        double speedScale = Math.min(1.0, distance / 0.5); // Scale down linearly within 0.5m
+        speedScale = Math.max(0.1, speedScale); // Minimum 10% speed to ensure we reach target
         
-        // Apply chassis speeds
+        // Limit maximum speeds for safety during precision control
+        // Close range: slow down significantly
+        double maxLinearSpeed = 1.0 * speedScale;
+        double maxAngularSpeed = 1.5; // rad/s
+        
+        chassisSpeeds.vxMetersPerSecond = MathUtil.clamp(chassisSpeeds.vxMetersPerSecond, -maxLinearSpeed, maxLinearSpeed);
+        chassisSpeeds.vyMetersPerSecond = MathUtil.clamp(chassisSpeeds.vyMetersPerSecond, -maxLinearSpeed, maxLinearSpeed);
+        chassisSpeeds.omegaRadiansPerSecond = MathUtil.clamp(chassisSpeeds.omegaRadiansPerSecond, -maxAngularSpeed, maxAngularSpeed);
+        
+        // Apply chassis speeds (robot relative)
         drivetrain.driveRobotRelative(chassisSpeeds);
         
         // Update telemetry
-        SmartDashboard.putNumber("VisionAssisted/Target X", targetPose.getX());
-        SmartDashboard.putNumber("VisionAssisted/Target Y", targetPose.getY());
-        SmartDashboard.putNumber("VisionAssisted/Target Rotation", targetPose.getRotation().getDegrees());
-        SmartDashboard.putNumber("VisionAssisted/Speed X", chassisSpeeds.vxMetersPerSecond);
-        SmartDashboard.putNumber("VisionAssisted/Speed Y", chassisSpeeds.vyMetersPerSecond);
-        SmartDashboard.putNumber("VisionAssisted/Speed Omega", Math.toDegrees(chassisSpeeds.omegaRadiansPerSecond));
+        SmartDashboard.putNumber("VisionAssisted/Target X", finalTargetPose.getX());
+        SmartDashboard.putNumber("VisionAssisted/Target Y", finalTargetPose.getY());
+        SmartDashboard.putNumber("VisionAssisted/Target Rotation", finalTargetPose.getRotation().getDegrees());
+        SmartDashboard.putNumber("VisionAssisted/Current Distance", distance);
         
         // Check if we're at the target
         if (visionController.atReference()) {
@@ -293,32 +316,79 @@ public class VisionAssistedAprilTagCommand extends Command {
      * Switches from PathPlanner phase to vision precision phase.
      */
     private void switchToVisionPhase() {
-        currentPhase = Phase.VISION;
-        phaseStartTime = Timer.getFPGATimestamp();
-        
-        // End PathPlanner command
+        // End PathPlanner command if running
         if (pathPlannerCommand != null) {
             pathPlannerCommand.end(false);
         }
         
+        currentPhase = Phase.VISION;
+        phaseStartTime = Timer.getFPGATimestamp();
+        
         SmartDashboard.putString("VisionAssisted/Phase", "VISION");
         SmartDashboard.putString("VisionAssisted/Status", "Switching to vision precision control");
+        
+        // Reset PID controllers for smooth transition
+        // Reset theta controller to current heading
+        visionController.getThetaController().reset(drivetrain.getPose().getRotation().getRadians());
         
         System.out.println("[VisionAssisted] Switching to vision precision control");
     }
     
     /**
-     * Calculates the final target pose (0.5m in front of tag, facing tag).
+     * Calculates the final target pose (TARGET_DISTANCE_METERS in front of tag, facing tag).
      */
     private Pose2d calculateFinalTargetPose(Pose2d tagPose) {
-        // Calculate position 0.5m in front of the tag
-        Translation2d offset = new Translation2d(TARGET_DISTANCE_METERS, tagPose.getRotation());
-        Translation2d targetTranslation = tagPose.getTranslation().plus(offset);
+        // Calculate position TARGET_DISTANCE_METERS in front of the tag
+        // Tags face OUT from the wall. We want to be in front of it.
+        // The tag's X axis points OUT from the tag.
         
-        // Face the tag (opposite of tag's facing direction)
+        // Vector pointing out from tag: (TARGET_DISTANCE_METERS, 0) relative to tag
+        Translation2d vectorOutFromTag = new Translation2d(TARGET_DISTANCE_METERS, 0.0);
+        
+        // Rotate this vector by the tag's rotation to get field-relative offset
+        Translation2d fieldRelativeOffset = vectorOutFromTag.rotateBy(tagPose.getRotation());
+        
+        // Target position is tag position + vector out
+        Translation2d targetTranslation = tagPose.getTranslation().plus(fieldRelativeOffset);
+        
+        // We want to face the tag.
+        // Tag faces OUT. We want to face IN (opposing the tag).
+        // Tag Rotation + 180 degrees.
         Rotation2d targetRotation = tagPose.getRotation().plus(Rotation2d.fromDegrees(180.0));
         
         return new Pose2d(targetTranslation, targetRotation);
+    }
+    
+    /**
+     * Calculates an approach pose for PathPlanner (further back than final target).
+     */
+    private Pose2d calculateApproachPose(Pose2d tagPose, double distanceMeters) {
+        // Same logic as above, but further away
+        Translation2d vectorOutFromTag = new Translation2d(distanceMeters, 0.0);
+        Translation2d fieldRelativeOffset = vectorOutFromTag.rotateBy(tagPose.getRotation());
+        Translation2d targetTranslation = tagPose.getTranslation().plus(fieldRelativeOffset);
+        Rotation2d targetRotation = tagPose.getRotation().plus(Rotation2d.fromDegrees(180.0));
+        
+        return new Pose2d(targetTranslation, targetRotation);
+    }
+    
+    /**
+     * Updates the final target pose based on live vision data.
+     * This helps correct for field map inaccuracies or tag shifts.
+     */
+    private void updateTargetPoseFromVision() {
+        if (!visionSubsystem.isTagVisible(targetTagId)) {
+            return;
+        }
+        
+        // Only update if we have a good target
+        visionSubsystem.getBestTarget().ifPresent(target -> {
+            if (target.getFiducialId() != targetTagId) return;
+            if (target.getPoseAmbiguity() > MAX_VISION_AMBIGUITY) return;
+            
+            // Note: We primarily rely on the fused robot pose which VisionSubsystem updates.
+            // But we could add advanced visual servoing logic here if needed.
+        });
     }
     
     /**
@@ -345,29 +415,5 @@ public class VisionAssistedAprilTagCommand extends Command {
         PhotonTrackedTarget target = bestTarget.get();
         return target.getFiducialId() == targetTagId && 
                target.getPoseAmbiguity() < MAX_VISION_AMBIGUITY;
-    }
-    
-    /**
-     * Gets a vision-updated target pose if available.
-     * Uses real-time vision measurement to refine the target position.
-     */
-    private Optional<Pose2d> getVisionUpdatedTargetPose() {
-        return visionSubsystem.getLatestEstimatedPose().map(estimatedPose -> {
-            // Use the vision-estimated robot pose to calculate a more accurate target
-            Pose2d robotPose = estimatedPose.estimatedPose.toPose2d();
-            
-            // Get the target AprilTag from vision
-            Optional<PhotonTrackedTarget> targetOpt = visionSubsystem.getVisibleTargets().stream()
-                .filter(target -> target.getFiducialId() == targetTagId)
-                .findFirst();
-            
-            if (targetOpt.isPresent()) {
-                // Use vision data to calculate more precise tag position
-                // This is a simplified approach - could be enhanced with full 3D transforms
-                return finalTargetPose;  // For now, use the layout-based pose
-            }
-            
-            return finalTargetPose;
-        });
     }
 }

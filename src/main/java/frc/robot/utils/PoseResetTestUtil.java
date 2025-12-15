@@ -55,12 +55,12 @@ public class PoseResetTestUtil {
     private void setupDashboard() {
         ShuffleboardTab tab = Shuffleboard.getTab("Match Setup");
         
-        tab.add("Start Position", poseChooser)
-           .withPosition(0, 0)
+        tab.add("Test Start Pose", poseChooser)
+           .withPosition(0, 1)
            .withSize(2, 1);
            
-        tab.add("RESET POSE", new InstantCommand(this::resetToSelectedPose))
-           .withPosition(2, 0)
+        tab.add("TEST RESET POSE", new InstantCommand(this::resetToSelectedPose))
+           .withPosition(2, 1)
            .withSize(2, 1);
     }
     

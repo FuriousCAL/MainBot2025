@@ -7,6 +7,8 @@ import com.ctre.phoenix6.swerve.SwerveRequest;
 
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
+import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -33,6 +35,11 @@ import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Translation2d;
+import java.util.Set;
+import java.util.Optional;
+
+// Import StartPosition from the new file
+import frc.robot.StartPosition;
 
 
 public class RobotContainer {
@@ -45,36 +52,8 @@ public class RobotContainer {
       .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
   private final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
   private final SwerveRequest.PointWheelsAt point = new SwerveRequest.PointWheelsAt();
-  // Simple deterministic test motions (40% speed/rate)
-  private final SwerveRequest.RobotCentric testForward  = new SwerveRequest.RobotCentric()
-      .withVelocityX(MaxSpeed * 0.4).withVelocityY(0).withRotationalRate(0);
-  private final SwerveRequest.RobotCentric testBackward = new SwerveRequest.RobotCentric()
-      .withVelocityX(-MaxSpeed * 0.4).withVelocityY(0).withRotationalRate(0);
-  private final SwerveRequest.RobotCentric testRight    = new SwerveRequest.RobotCentric()
-      .withVelocityX(0).withVelocityY(-MaxSpeed * 0.4).withRotationalRate(0);
-  private final SwerveRequest.RobotCentric testLeft     = new SwerveRequest.RobotCentric()
-      .withVelocityX(0).withVelocityY(MaxSpeed * 0.4).withRotationalRate(0);
-  private final SwerveRequest.RobotCentric testRotate   = new SwerveRequest.RobotCentric()
-      .withVelocityX(0).withVelocityY(0).withRotationalRate(MaxAngularRate * 0.4);
-
-  private final Field2d field = new Field2d();           // Field widget
-  private final Telemetry logger;                        // <-- declare only
-
-  public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
-  public final VisionSubsystem visionSubsystem = new VisionSubsystem();
-  private final CommandXboxController joystick = new CommandXboxController(0);
-
-  private SendableChooser<Command> autoChooser;
   
-  // ============================================================================
-  // TEST UTILITY: Pose Reset (REMOVE AFTER TESTING)
-  // ============================================================================
-  // This utility allows resetting robot pose via dashboard during testing.
-  // TO REMOVE: Delete PoseResetTestUtil.java and remove the lines below.
-  private PoseResetTestUtil poseResetUtil;
-  // ============================================================================
-  
-  // Add a Field-Centric request in parallel to Robot-Centric
+  // Field-Centric request
   private final SwerveRequest.FieldCentric fieldDrive = new SwerveRequest.FieldCentric()
     .withDeadband(MaxSpeed * 0.1)
     .withRotationalDeadband(MaxAngularRate * 0.1)
@@ -86,21 +65,45 @@ public class RobotContainer {
   // Safe pose (3, 3, 0°) — reuse your constant
   private static final Pose2d SAFE_POSE = AprilTagConstants.HOME_POSITION;
 
+  private final Field2d field = new Field2d();           // Field widget
+  private final Telemetry logger;                        // <-- declare only
+
+  public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
+  public final VisionSubsystem visionSubsystem = new VisionSubsystem();
+  private final CommandXboxController joystick = new CommandXboxController(0);
+
+  private SendableChooser<Command> autoChooser;
+  
+  // Match Setup Choosers
+  private final SendableChooser<Alliance> teamChooser = new SendableChooser<>();
+  private final SendableChooser<StartPosition> startPositionChooser = new SendableChooser<>();
+
+  // ============================================================================
+  // TEST UTILITY: Pose Reset (REMOVE AFTER TESTING)
+  // ============================================================================
+  // This utility allows resetting robot pose via dashboard during testing.
+  // TO REMOVE: Delete PoseResetTestUtil.java and remove the lines below.
+  private PoseResetTestUtil poseResetUtil;
+  // ============================================================================
+  
   public RobotContainer() {
     // 1) PathPlanner hooks
     configurePathPlanner();
 
     // 2) Chooser before adding options
     createAutoChooser();
+    
+    // 3) Match Setup Configuration
+    configureMatchSetup();
 
-    // 3) Expose field widget & create telemetry
+    // 4) Expose field widget & create telemetry
     SmartDashboard.putData("Field", field);
     logger = new Telemetry(MaxSpeed, field);            // <-- construct once
 
-    // 4) Setup vision pose fusion
+    // 5) Setup vision pose fusion
     configureVisionFusion();
 
-    // 5) Default teleop drive
+    // 6) Default teleop drive
     drivetrain.setDefaultCommand(
       drivetrain.applyRequest(() -> {
          // Don't run default command in test mode
@@ -135,18 +138,15 @@ public class RobotContainer {
         }
       })
       .withName("DefaultTeleopDrive")
-      .beforeStarting(() -> System.out.println("[RobotContainer] Default teleop drive command starting"))
-      .finallyDo((interrupted) -> System.out.println("[RobotContainer] Default teleop drive command ending (interrupted: " + interrupted + ")"))
-
     );
 
-    // 6) Buttons and SysId
+    // 7) Buttons and SysId
     configureBindings();
 
-    // 7) Add custom auto options
+    // 8) Add custom auto options
     populateAutoChooser();
 
-    // 8) Feed telemetry (this updates Field2d via Telemetry.telemeterize)
+    // 9) Feed telemetry (this updates Field2d via Telemetry.telemeterize)
     drivetrain.registerTelemetry(logger::telemeterize);
     
     // ============================================================================
@@ -154,6 +154,67 @@ public class RobotContainer {
     // ============================================================================
     configurePoseResetTestUtil();
     // ============================================================================
+  }
+  
+  /**
+   * Configure the Match Setup tab on Shuffleboard.
+   * This allows the driver to select the alliance team and starting position.
+   */
+  private void configureMatchSetup() {
+      ShuffleboardTab matchTab = Shuffleboard.getTab("Match Setup");
+      
+      // Team Chooser
+      teamChooser.setDefaultOption("Blue Alliance", Alliance.Blue);
+      teamChooser.addOption("Red Alliance", Alliance.Red);
+      matchTab.add("Team Selection", teamChooser)
+              .withPosition(0, 0)
+              .withSize(2, 1);
+      
+      // Start Position Chooser
+      startPositionChooser.setDefaultOption(StartPosition.MID.displayName, StartPosition.MID);
+      startPositionChooser.addOption(StartPosition.TOP.displayName, StartPosition.TOP);
+      startPositionChooser.addOption(StartPosition.LOW.displayName, StartPosition.LOW);
+      matchTab.add("Start Position", startPositionChooser)
+              .withPosition(2, 0)
+              .withSize(2, 1);
+              
+      // Button to reset pose based on selection
+      matchTab.add("SET START POSE", Commands.runOnce(this::resetPoseToMatchSetup))
+              .withPosition(4, 0)
+              .withSize(2, 1);
+  }
+
+  /**
+   * Resets the robot's pose based on the Match Setup selections.
+   * This should be called during autonomousInit() or manually via the dashboard button.
+   */
+  public void resetPoseToMatchSetup() {
+      Alliance selectedAlliance = teamChooser.getSelected();
+      StartPosition selectedPos = startPositionChooser.getSelected();
+      
+      if (selectedAlliance == null || selectedPos == null) {
+          System.err.println("[MatchSetup] Invalid selection: Team or Position is null");
+          return;
+      }
+      
+      // Get base pose (Blue alliance relative)
+      Pose2d startPose = selectedPos.bluePose;
+      
+      // If Red alliance, flip the pose to the other side of the field
+      if (selectedAlliance == Alliance.Red) {
+          // Flip X coordinate: FieldLength - X
+          // Flip Rotation: 180 - Rotation
+          // Y coordinate remains the same (mirrored field)
+          double fieldLength = AprilTagConstants.FIELD_LAYOUT.getFieldLength();
+          double flippedX = fieldLength - startPose.getX();
+          Rotation2d flippedRot = Rotation2d.fromDegrees(180).minus(startPose.getRotation());
+          
+          startPose = new Pose2d(flippedX, startPose.getY(), flippedRot);
+      }
+      
+      // Apply the pose reset
+      drivetrain.resetPose(startPose);
+      System.out.println("[MatchSetup] Pose reset to " + selectedAlliance + " " + selectedPos.name() + ": " + startPose);
   }
 
   /**
@@ -180,7 +241,7 @@ public class RobotContainer {
     });
   }
 
-private void configureBindings() {
+  private void configureBindings() {
     // ============================================================================
     // PROFESSIONAL FRC TEAM CONTROLLER LAYOUT (Following 254/971/1678 patterns)
     // ============================================================================
@@ -189,7 +250,6 @@ private void configureBindings() {
     // Left Bumper: Toggle Field/Robot Centric (industry standard)
     joystick.leftBumper().onTrue(Commands.runOnce(() -> {
         isFieldCentric = !isFieldCentric;
-        System.out.println("Drive mode: " + (isFieldCentric ? "Field" : "Robot") + " centric");
         if (isFieldCentric) {
             drivetrain.seedFieldCentric();
         }
@@ -229,9 +289,44 @@ private void configureBindings() {
     
     // X + A: Drive to AprilTag 4 (Source side)
     joystick.x().and(joystick.a()).onTrue(new VisionAssistedAprilTagCommand(drivetrain, visionSubsystem, 4));
+    
+    // === AUTOMATED FIELD NAVIGATION (Red/Blue Aware) ===
+    // Use POV/D-pad to trigger specific tags based on alliance
+    
+    // D-Pad Up: Speaker Center (Tag 7 for Blue, Tag 4 for Red)
+    joystick.povUp().onTrue(Commands.defer(() -> {
+        var alliance = DriverStation.getAlliance();
+        int tagId = 7; // Default Blue Speaker (7)
+        if (alliance.isPresent() && alliance.get() == Alliance.Red) {
+            tagId = 4; // Red Speaker (4)
+        }
+        return new VisionAssistedAprilTagCommand(drivetrain, visionSubsystem, tagId);
+    }, Set.of(drivetrain, visionSubsystem)));
+    
+    // D-Pad Left: Amp (Tag 6 for Blue, Tag 5 for Red)
+    joystick.povLeft().onTrue(Commands.defer(() -> {
+        var alliance = DriverStation.getAlliance();
+        int tagId = 6; // Default Blue Amp (6)
+        if (alliance.isPresent() && alliance.get() == Alliance.Red) {
+            tagId = 5; // Red Amp (5)
+        }
+        return new VisionAssistedAprilTagCommand(drivetrain, visionSubsystem, tagId);
+    }, Set.of(drivetrain, visionSubsystem)));
+    
+    // D-Pad Right: Source (Tag 1 for Blue, Tag 10 for Red)
+    // Note: Choosing the source tag closest to the alliance wall for simplicity
+    joystick.povRight().onTrue(Commands.defer(() -> {
+        var alliance = DriverStation.getAlliance();
+        int tagId = 1; // Default Blue Source (1 or 2, using 1)
+        if (alliance.isPresent() && alliance.get() == Alliance.Red) {
+            tagId = 10; // Red Source (9 or 10, using 10)
+        }
+        return new VisionAssistedAprilTagCommand(drivetrain, visionSubsystem, tagId);
+    }, Set.of(drivetrain, visionSubsystem)));
 
     // === SAFETY AND UTILITY ===
     // Y Button: Return to home position (safe zone)
+    // NOTE: This uses the SAFE_POSE constant directly, not the Shuffleboard-selected start pose
     joystick.y().onTrue(new DriveToHomeCommand(drivetrain));
     
     // Start Button: Vision system test (drive to AprilTag 2 with simple PID)
@@ -241,35 +336,16 @@ private void configureBindings() {
     joystick.back().onTrue(new DriveToHomeCommand(drivetrain));
 
     // === D-PAD: QUICK NAVIGATION (Optional) ===
-    // D-pad Up: Quick home return
-    joystick.povUp().onTrue(new DriveToHomeCommand(drivetrain));
-    
     // D-pad Down: Vision test (same as Start)
     joystick.povDown().onTrue(new DriveToAprilTag2Command(drivetrain, visionSubsystem));
-    
-    // D-pad Left: Point all wheels to 0° (forward) - DEBUG: Check encoder offsets
-    joystick.povLeft().onTrue(Commands.runOnce(() -> 
-        System.out.println("[DEBUG] Pointing all wheels to 0° (forward) - Hold D-pad Left to maintain")
-    ));
-    joystick.povLeft().whileTrue(
-        drivetrain.applyRequest(() -> point.withModuleDirection(Rotation2d.fromDegrees(0.0)))
-    );
-    
-    // D-pad Right: Point all wheels to 90° (left) - DEBUG: Check 90° alignment
-    joystick.povRight().onTrue(Commands.runOnce(() -> 
-        System.out.println("[DEBUG] Pointing all wheels to 90° (left) - Hold D-pad Right to maintain")
-    ));
-    joystick.povRight().whileTrue(
-        drivetrain.applyRequest(() -> point.withModuleDirection(Rotation2d.fromDegrees(90.0)))
-    );
 
     System.out.println("[Controller] Professional FRC team layout loaded");
     System.out.println("  Core: LB=Toggle Mode, RB=Brake, A=Cancel, B=Point, Y=Home");
     System.out.println("  Vision: X+Y=Tag2, X+B=Tag1, Y+B=Tag3, X+A=Tag4");
+    System.out.println("  Red/Blue: POV-Up=Speaker, POV-Left=Amp, POV-Right=Source");
     System.out.println("  Safety: Start=Vision Test, Back=Emergency Home");
-    System.out.println("  Debug: D-pad Left=Wheels to 0°, D-pad Right=Wheels to 90°");
     System.out.println("  Rotation: Left stick = CCW, Right stick = CW");
-}
+  }
 
 
   private void configurePathPlanner() {
