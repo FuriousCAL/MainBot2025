@@ -1,4 +1,14 @@
 {
+  "FMS": {
+    "window": {
+      "visible": false
+    }
+  },
+  "System Joysticks": {
+    "window": {
+      "enabled": false
+    }
+  },
   "keyboardJoysticks": [
     {
       "axisConfig": [
@@ -94,6 +104,5 @@
       "guid": "78696e70757401000000000000000000",
       "useGamepad": true
     }
-  ],
-  "useEstopHotkey": true
+  ]
 }

@@ -55,7 +55,11 @@
 ### Phase 2: Hardware Sanity Checks (Blocks)
 **Objective:** Ensure motors and encoders are configured correctly.
 
-1.  **Wheel Alignment:**
+1.  **Vision Integration (See: `docs/VISION_TESTING_GUIDE.md`):**
+    *   **CRITICAL**: Since the robot doesn't move on blocks, vision automations will fail (spin forever) unless you "move the world" (the tag).
+    *   Test "Drive to Tag" by holding a tag and moving it relative to the suspended robot.
+
+2.  **Wheel Alignment:**
     *   Put robot on blocks.
     *   Press **D-Pad Left**. Verify all wheels point straight forward.
     *   Press **D-Pad Right**. Verify all wheels point left.

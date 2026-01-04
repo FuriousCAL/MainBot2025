@@ -5,6 +5,7 @@
 package frc.robot;
 
 import edu.wpi.first.wpilibj.RobotBase;
+import frc.robot.Robot;
 
 public final class Main {
   private Main() {}
@@ -13,4 +14,3 @@ public final class Main {
     RobotBase.startRobot(Robot::new);
   }
 }
-

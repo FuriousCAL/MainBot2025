@@ -62,13 +62,6 @@ public final class AprilTagConstants {
      */
     public static final Pose2d SAFE_POSE = new Pose2d(3.0, 3.0, Rotation2d.fromDegrees(0.0));
 
-    /**
-     * Legacy alias for SAFE_POSE to maintain backward compatibility.
-     * 
-     * @deprecated Use SAFE_POSE instead for clarity
-     */
-    @Deprecated
-    public static final Pose2d HOME_POSITION = SAFE_POSE;
 
     // ==========================================================================
     // UTILITY METHODS

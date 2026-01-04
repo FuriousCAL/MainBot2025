@@ -16,7 +16,7 @@ public class DriveToHomeCommand extends Command {
     public DriveToHomeCommand(CommandSwerveDrivetrain drivetrain) {
         this.delegate = new PathPlannerNavigationCommand(
             drivetrain, 
-            AprilTagConstants.HOME_POSITION, 
+            AprilTagConstants.SAFE_POSE, 
             PathPlannerUtils.getDefaultPathConstraints(),
             "Home Position"
         );

@@ -30,7 +30,6 @@ import frc.robot.constants.AprilTagConstants;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.VisionSubsystem;
-import frc.robot.utils.PoseResetTestUtil;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -62,9 +61,6 @@ public class RobotContainer {
   // Start in field-centric; LB will toggle this
   private boolean isFieldCentric = true;
 
-  // Safe pose (3, 3, 0°) — reuse your constant
-  private static final Pose2d SAFE_POSE = AprilTagConstants.HOME_POSITION;
-
   private final Field2d field = new Field2d();           // Field widget
   private final Telemetry logger;                        // <-- declare only
 
@@ -77,14 +73,10 @@ public class RobotContainer {
   // Match Setup Choosers
   private final SendableChooser<Alliance> teamChooser = new SendableChooser<>();
   private final SendableChooser<StartPosition> startPositionChooser = new SendableChooser<>();
-
-  // ============================================================================
-  // TEST UTILITY: Pose Reset (REMOVE AFTER TESTING)
-  // ============================================================================
-  // This utility allows resetting robot pose via dashboard during testing.
-  // TO REMOVE: Delete PoseResetTestUtil.java and remove the lines below.
-  private PoseResetTestUtil poseResetUtil;
-  // ============================================================================
+  
+  // Track last selected values to avoid repetitive updates
+  private Alliance lastAlliance = null;
+  private StartPosition lastStartPosition = null;
   
   public RobotContainer() {
     // 1) PathPlanner hooks
@@ -148,12 +140,6 @@ public class RobotContainer {
 
     // 9) Feed telemetry (this updates Field2d via Telemetry.telemeterize)
     drivetrain.registerTelemetry(logger::telemeterize);
-    
-    // ============================================================================
-    // TEST UTILITY: Configure pose reset utility (REMOVE AFTER TESTING)
-    // ============================================================================
-    configurePoseResetTestUtil();
-    // ============================================================================
   }
   
   /**
@@ -179,7 +165,7 @@ public class RobotContainer {
               .withSize(2, 1);
               
       // Button to reset pose based on selection
-      matchTab.add("SET START POSE", Commands.runOnce(this::resetPoseToMatchSetup))
+      matchTab.add("SET START POSE", Commands.runOnce(() -> resetPoseToMatchSetup(true)))
               .withPosition(4, 0)
               .withSize(2, 1);
   }
@@ -189,13 +175,34 @@ public class RobotContainer {
    * This should be called during autonomousInit() or manually via the dashboard button.
    */
   public void resetPoseToMatchSetup() {
+      resetPoseToMatchSetup(false);
+  }
+
+  /**
+   * Resets the robot's pose based on the Match Setup selections.
+   * 
+   * @param forceReset If true, resets pose even if selection hasn't changed.
+   */
+  public void resetPoseToMatchSetup(boolean forceReset) {
       Alliance selectedAlliance = teamChooser.getSelected();
       StartPosition selectedPos = startPositionChooser.getSelected();
       
-      if (selectedAlliance == null || selectedPos == null) {
-          System.err.println("[MatchSetup] Invalid selection: Team or Position is null");
-          return;
+      // Fallback to defaults if dashboard hasn't connected/sent values yet
+      if (selectedAlliance == null) {
+          selectedAlliance = Alliance.Blue;
       }
+      if (selectedPos == null) {
+          selectedPos = StartPosition.MID;
+      }
+      
+      // Check if selection changed (unless forcing reset)
+      if (!forceReset && selectedAlliance == lastAlliance && selectedPos == lastStartPosition) {
+          return; // No change, do nothing
+      }
+      
+      // Update last state
+      lastAlliance = selectedAlliance;
+      lastStartPosition = selectedPos;
       
       // Get base pose (Blue alliance relative)
       Pose2d startPose = selectedPos.bluePose;
@@ -383,6 +390,13 @@ public class RobotContainer {
       autoChooser = new SendableChooser<>();
       System.err.println("[Auto] AutoBuilder not configured, using empty chooser: " + ex.getMessage());
     }
+    // Add to specific "Auto" tab
+    Shuffleboard.getTab("Auto")
+        .add("Auto Chooser", autoChooser)
+        .withPosition(0, 0)
+        .withSize(2, 1);
+        
+    // Also keep on SmartDashboard for backward compatibility/ease of access
     SmartDashboard.putData("Auto Chooser", autoChooser);
   }
 
@@ -445,36 +459,4 @@ public class RobotContainer {
     return autoChooser != null ? autoChooser.getSelected() : Commands.none();
   }
   
-  // ============================================================================
-  // TEST UTILITY: Pose Reset Configuration (REMOVE AFTER TESTING)
-  // ============================================================================
-  /**
-   * Configures the pose reset test utility for dashboard access.
-   * This allows resetting the robot's pose during testing via Shuffleboard/Glass.
-   * 
-   * TO REMOVE: Delete this method and the call to it in the constructor.
-   */
-  private void configurePoseResetTestUtil() {
-    poseResetUtil = new PoseResetTestUtil(drivetrain);
-    
-    // Add a button widget to trigger pose reset
-    SmartDashboard.putData("TEST: Reset Pose to Selected", 
-        Commands.runOnce(() -> {
-          if (poseResetUtil != null) {
-            poseResetUtil.resetToSelectedPose();
-          }
-        }));
-    
-    System.out.println("[PoseResetTest] Pose reset utility configured. Use 'TEST: Reset Robot Pose' chooser and 'TEST: Reset Pose to Selected' button on dashboard.");
-  }
-  
-  /**
-   * Gets the pose reset utility (for external access if needed).
-   * 
-   * @return The pose reset utility, or null if not configured
-   */
-  public PoseResetTestUtil getPoseResetUtil() {
-    return poseResetUtil;
-  }
-  // ============================================================================
 }

@@ -9,6 +9,9 @@ import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.wpilibj.DataLogManager;
+import edu.wpi.first.wpilibj.DriverStation;
 
 /**
  * The main Robot class for MinBot2.
@@ -26,9 +29,50 @@ public class Robot extends TimedRobot {
      */
     @Override
     public void robotInit() {
+        // Start DataLogManager to log NetworkTables and DriverStation data
+        DataLogManager.start();
+        DriverStation.startDataLog(DataLogManager.getLog());
+        
+        // Log active commands
+        CommandScheduler.getInstance().onCommandInitialize(cmd -> DataLogManager.log("Command initialized: " + cmd.getName()));
+        CommandScheduler.getInstance().onCommandInterrupt(cmd -> DataLogManager.log("Command interrupted: " + cmd.getName()));
+        CommandScheduler.getInstance().onCommandFinish(cmd -> DataLogManager.log("Command finished: " + cmd.getName()));
+
+        // Configure NetworkTables to connect to PhotonVision camera
+        configureNetworkTablesForVision();
+        
         m_robotContainer = new RobotContainer();
-        // Zero heading at startup to 0° using HOME_POSITION's rotation
-        m_robotContainer.drivetrain.resetPose(AprilTagConstants.HOME_POSITION);
+        
+        // Initialize robot pose based on default Match Setup selection (Blue Mid)
+        m_robotContainer.resetPoseToMatchSetup();
+    }
+    
+    /**
+     * Configures NetworkTables to connect to the PhotonVision camera.
+     * This allows the simulation to access the real camera at 192.168.86.30.
+     */
+    private void configureNetworkTablesForVision() {
+        try {
+            // Get the NetworkTables instance
+            NetworkTableInstance ntInstance = NetworkTableInstance.getDefault();
+            
+            // Set up the connection to your PhotonVision camera
+            // This allows the simulation to connect to the camera on your robot's network
+            ntInstance.startClient4("MinBot2_Simulation");
+            ntInstance.setServer("192.168.86.30", 10000); // PhotonVision default port
+            
+            // Enable verbose logging for debugging
+            ntInstance.setServerTeam(5432); // Your team number
+            ntInstance.startDSClient();
+            
+            System.out.println("[Robot] NetworkTables configured to connect to PhotonVision camera at 192.168.86.30");
+            System.out.println("[Robot] If connection fails, ensure your camera is accessible from this machine");
+            System.out.println("[Robot] Camera dashboard: http://192.168.86.30:5800/#/camera");
+            
+        } catch (Exception e) {
+            System.err.println("[Robot] Failed to configure NetworkTables for PhotonVision: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     /**
@@ -71,7 +115,11 @@ public class Robot extends TimedRobot {
      */
     @Override
     public void disabledInit() {
-        // TODO: Add any disabled initialization logic
+        // Force a pose reset when entering disabled mode to ensure the simulation 
+        // starts at the correct position even if the initial robotInit set was overwritten.
+        if (m_robotContainer != null) {
+            m_robotContainer.resetPoseToMatchSetup(true);
+        }
     }
 
     /**
@@ -79,7 +127,11 @@ public class Robot extends TimedRobot {
      */
     @Override
     public void disabledPeriodic() {
-        // TODO: Add any disabled periodic logic
+        // Continuously update robot pose based on Match Setup selection while disabled
+        // This allows the driver to see the start position update in real-time on the field map
+        if (m_robotContainer != null) {
+            m_robotContainer.resetPoseToMatchSetup();
+        }
     }
 
     /**

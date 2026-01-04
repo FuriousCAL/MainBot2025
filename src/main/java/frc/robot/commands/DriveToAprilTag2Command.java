@@ -5,6 +5,7 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.constants.AprilTagConstants;
@@ -76,12 +77,11 @@ public class DriveToAprilTag2Command extends Command {
         
         drivetrain.driveRobotRelative(robotRelativeSpeeds);
         
-        System.out.printf("DriveToAprilTag2: Current=(%.2f, %.2f, %.1f), Target=(%.2f, %.2f, %.1f), Errors=(%.2f, %.2f, %.1f), Time=%.1fs\n",
-            currentPose.getX(), currentPose.getY(), Math.toDegrees(currentPose.getRotation().getRadians()),
-            targetPose.getX(), targetPose.getY(), Math.toDegrees(targetPose.getRotation().getRadians()),
-            xError, yError, Math.toDegrees(rotationError),
-            Timer.getFPGATimestamp() - startTime
-        );
+        // Log errors to SmartDashboard (NetworkTables -> DataLog)
+        SmartDashboard.putNumber("DriveToAprilTag2/X Error", xError);
+        SmartDashboard.putNumber("DriveToAprilTag2/Y Error", yError);
+        SmartDashboard.putNumber("DriveToAprilTag2/Rotation Error Deg", Math.toDegrees(rotationError));
+        SmartDashboard.putNumber("DriveToAprilTag2/Time", Timer.getFPGATimestamp() - startTime);
     }
     
     @Override

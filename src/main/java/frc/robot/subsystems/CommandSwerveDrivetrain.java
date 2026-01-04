@@ -11,8 +11,13 @@ import com.ctre.phoenix6.swerve.SwerveModuleConstants;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 
 import edu.wpi.first.math.Matrix;
+import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.networktables.GenericEntry;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
@@ -36,6 +41,16 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private static final double kSimLoopPeriod = 0.005; // 5 ms
     private Notifier m_simNotifier = null;
     private double m_lastSimTime;
+
+    private final GenericEntry reqVelXEntry;
+    private final GenericEntry reqVelYEntry;
+    private final GenericEntry reqAngRateEntry;
+    private final GenericEntry actVelXEntry;
+    private final GenericEntry actVelYEntry;
+    private final GenericEntry actAngRateEntry;
+    private final GenericEntry poseXEntry;
+    private final GenericEntry poseYEntry;
+    private final GenericEntry poseRotEntry;
 
     /* Blue alliance sees forward as 0 degrees (toward red alliance wall) */
     private static final Rotation2d kBlueAlliancePerspectiveRotation = Rotation2d.kZero;
@@ -130,6 +145,18 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         SwerveModuleConstants<?, ?, ?>... modules
     ) {
         super(drivetrainConstants, odometryUpdateFrequency, modules);
+        
+        ShuffleboardTab driveTab = Shuffleboard.getTab("Drive");
+        reqVelXEntry = driveTab.add("Req Vel X", 0.0).getEntry();
+        reqVelYEntry = driveTab.add("Req Vel Y", 0.0).getEntry();
+        reqAngRateEntry = driveTab.add("Req Ang Rate", 0.0).getEntry();
+        actVelXEntry = driveTab.add("Act Vel X", 0.0).getEntry();
+        actVelYEntry = driveTab.add("Act Vel Y", 0.0).getEntry();
+        actAngRateEntry = driveTab.add("Act Ang Rate", 0.0).getEntry();
+        poseXEntry = driveTab.add("Pose X", 0.0).getEntry();
+        poseYEntry = driveTab.add("Pose Y", 0.0).getEntry();
+        poseRotEntry = driveTab.add("Pose Rot", 0.0).getEntry();
+
         if (Utils.isSimulation()) {
             startSimThread();
         }
@@ -162,6 +189,18 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         SwerveModuleConstants<?, ?, ?>... modules
     ) {
         super(drivetrainConstants, odometryUpdateFrequency, odometryStandardDeviation, visionStandardDeviation, modules);
+        
+        ShuffleboardTab driveTab = Shuffleboard.getTab("Drive");
+        reqVelXEntry = driveTab.add("Req Vel X", 0.0).getEntry();
+        reqVelYEntry = driveTab.add("Req Vel Y", 0.0).getEntry();
+        reqAngRateEntry = driveTab.add("Req Ang Rate", 0.0).getEntry();
+        actVelXEntry = driveTab.add("Act Vel X", 0.0).getEntry();
+        actVelYEntry = driveTab.add("Act Vel Y", 0.0).getEntry();
+        actAngRateEntry = driveTab.add("Act Ang Rate", 0.0).getEntry();
+        poseXEntry = driveTab.add("Pose X", 0.0).getEntry();
+        poseYEntry = driveTab.add("Pose Y", 0.0).getEntry();
+        poseRotEntry = driveTab.add("Pose Rot", 0.0).getEntry();
+
         if (Utils.isSimulation()) {
             startSimThread();
         }
@@ -172,13 +211,17 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     }
 
     public void resetPose(Pose2d pose) {
-        // NOTE: standard SwerveDrivetrain doesn't expose a way to set arbitrary pose easily
-        // We reset to field centric (0,0,0) and set the operator perspective
+        // Using "vision measurement" hack to reset pose since Phoenix 6 SwerveDrivetrain 
+        // handles odometry internally. This forces the estimator to the desired pose.
         try { 
-            this.setOperatorPerspectiveForward(pose.getRotation()); 
-            this.seedFieldCentric();
+            this.setOperatorPerspectiveForward(pose.getRotation());
+            
+            // Apply high-confidence vision measurement to reset pose
+            // standard deviation 0.1 is very low variance = high trust
+            this.addVisionMeasurement(pose, Timer.getFPGATimestamp(), VecBuilder.fill(0.1, 0.1, 0.1));
+            
         } catch (Throwable t) {
-            try { this.seedFieldCentric(); } catch (Throwable t2) {}
+            System.err.println("Failed to reset pose: " + t.getMessage());
         }
     }
 
@@ -188,9 +231,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     public void driveRobotRelative(ChassisSpeeds speeds) {
         // Log velocity requests for debugging
-        SmartDashboard.putNumber("Drivetrain/RequestedVelocityX", speeds.vxMetersPerSecond);
-        SmartDashboard.putNumber("Drivetrain/RequestedVelocityY", speeds.vyMetersPerSecond);
-        SmartDashboard.putNumber("Drivetrain/RequestedAngularRate", speeds.omegaRadiansPerSecond);
+        if (reqVelXEntry != null) { // Check null in case initialized differently (redundant safety)
+            reqVelXEntry.setDouble(speeds.vxMetersPerSecond);
+            reqVelYEntry.setDouble(speeds.vyMetersPerSecond);
+            reqAngRateEntry.setDouble(speeds.omegaRadiansPerSecond);
+        }
         
         var request = new SwerveRequest.RobotCentric()
             .withVelocityX(speeds.vxMetersPerSecond)
@@ -200,9 +245,11 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         
         // Log actual speeds after applying
         var state = this.getState();
-        SmartDashboard.putNumber("Drivetrain/ActualVelocityX", state.Speeds.vxMetersPerSecond);
-        SmartDashboard.putNumber("Drivetrain/ActualVelocityY", state.Speeds.vyMetersPerSecond);
-        SmartDashboard.putNumber("Drivetrain/ActualAngularRate", state.Speeds.omegaRadiansPerSecond);
+        if (actVelXEntry != null) {
+            actVelXEntry.setDouble(state.Speeds.vxMetersPerSecond);
+            actVelYEntry.setDouble(state.Speeds.vyMetersPerSecond);
+            actAngRateEntry.setDouble(state.Speeds.omegaRadiansPerSecond);
+        }
     }
 
     /**
@@ -271,12 +318,14 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         
         // Log drivetrain state for debugging
         var state = this.getState();
-        SmartDashboard.putNumber("Drivetrain/PoseX", state.Pose.getX());
-        SmartDashboard.putNumber("Drivetrain/PoseY", state.Pose.getY());
-        SmartDashboard.putNumber("Drivetrain/PoseRotation", state.Pose.getRotation().getDegrees());
-        SmartDashboard.putNumber("Drivetrain/ActualVelocityX", state.Speeds.vxMetersPerSecond);
-        SmartDashboard.putNumber("Drivetrain/ActualVelocityY", state.Speeds.vyMetersPerSecond);
-        SmartDashboard.putNumber("Drivetrain/ActualAngularRate", state.Speeds.omegaRadiansPerSecond);
+        if (poseXEntry != null) {
+            poseXEntry.setDouble(state.Pose.getX());
+            poseYEntry.setDouble(state.Pose.getY());
+            poseRotEntry.setDouble(state.Pose.getRotation().getDegrees());
+            actVelXEntry.setDouble(state.Speeds.vxMetersPerSecond);
+            actVelYEntry.setDouble(state.Speeds.vyMetersPerSecond);
+            actAngRateEntry.setDouble(state.Speeds.omegaRadiansPerSecond);
+        }
     }
 
     private void startSimThread() {

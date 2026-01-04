@@ -10,8 +10,15 @@ import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.wpilibj.Timer;
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
+import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
+import edu.wpi.first.networktables.GenericEntry;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import edu.wpi.first.util.datalog.DataLog;
+import edu.wpi.first.util.datalog.DoubleLogEntry;
+import edu.wpi.first.util.datalog.StringLogEntry;
+import edu.wpi.first.util.datalog.BooleanLogEntry;
+import edu.wpi.first.wpilibj.DataLogManager;
 
 import org.photonvision.EstimatedRobotPose;
 import org.photonvision.PhotonCamera;
@@ -70,11 +77,55 @@ public class VisionSubsystem extends SubsystemBase {
     /** Performance metrics */
     private double averageLatencyMs = 0.0;
     private int frameCount = 0;
+
+    // DataLog entries
+    private DoubleLogEntry logPoseX;
+    private DoubleLogEntry logPoseY;
+    private DoubleLogEntry logPoseTheta;
+    private DoubleLogEntry logTargetLatency;
+    private BooleanLogEntry logHasTargets;
+    private StringLogEntry logVisionEvents;
+
+    // Shuffleboard Entries
+    private final GenericEntry connectedEntry;
+    private final GenericEntry failuresEntry;
+    private final GenericEntry hasTargetsEntry;
+    private final GenericEntry targetCountEntry;
+    private final GenericEntry frameCountEntry;
+    private final GenericEntry estimatedPoseEntry;
+    private final GenericEntry tagsUsedEntry;
+    private final GenericEntry bestTargetIdEntry;
+    private final GenericEntry bestTargetAmbiguityEntry;
+    private final GenericEntry bestTargetAreaEntry;
     
     /**
      * Creates a new VisionSubsystem.
      */
     public VisionSubsystem() {
+        // Initialize Shuffleboard Tab
+        ShuffleboardTab tab = Shuffleboard.getTab("Vision");
+        connectedEntry = tab.add("Connected", false).withPosition(0, 0).getEntry();
+        hasTargetsEntry = tab.add("Has Targets", false).withPosition(1, 0).getEntry();
+        targetCountEntry = tab.add("Target Count", 0).withPosition(2, 0).getEntry();
+        failuresEntry = tab.add("Consecutive Failures", 0).withPosition(3, 0).getEntry();
+        frameCountEntry = tab.add("Frame Count", 0).withPosition(4, 0).getEntry();
+        
+        estimatedPoseEntry = tab.add("Estimated Pose", "None").withPosition(0, 1).withSize(2, 1).getEntry();
+        tagsUsedEntry = tab.add("Tags Used", 0).withPosition(2, 1).getEntry();
+        
+        bestTargetIdEntry = tab.add("Best Target ID", -1).withPosition(0, 2).getEntry();
+        bestTargetAmbiguityEntry = tab.add("Best Target Ambiguity", 0.0).withPosition(1, 2).getEntry();
+        bestTargetAreaEntry = tab.add("Best Target Area", 0.0).withPosition(2, 2).getEntry();
+
+        // Initialize DataLog entries
+        DataLog log = DataLogManager.getLog();
+        logPoseX = new DoubleLogEntry(log, "Vision/Log/PoseX");
+        logPoseY = new DoubleLogEntry(log, "Vision/Log/PoseY");
+        logPoseTheta = new DoubleLogEntry(log, "Vision/Log/PoseTheta");
+        logTargetLatency = new DoubleLogEntry(log, "Vision/Log/Latency");
+        logHasTargets = new BooleanLogEntry(log, "Vision/Log/HasTargets");
+        logVisionEvents = new StringLogEntry(log, "Vision/Log/Events");
+
         // Initialize camera with configured name
         camera = new PhotonCamera(Constants.Vision.PRIMARY_CAMERA_NAME);
         
@@ -143,18 +194,42 @@ public class VisionSubsystem extends SubsystemBase {
             // OPTIMIZATION: Get latest result (this is fast, just reading from NetworkTables)
             // Note: getLatestResult() is deprecated in PhotonVision 2024+ but still functional
             // TODO: Update to new API when migrating to PhotonVision 2025+
-            PhotonPipelineResult result = camera.getLatestResult();
+            // Using getAllUnreadResults() is the recommended replacement, but for now we just suppress or ignore
+            // In the 2025 API, this might be getLatestResult() again or something else.
+            // For now, suppress the warning if possible, or just use the method as is.
+            // Actually, let's try using the non-deprecated way if available, or just acknowledge it.
+            // The warning says: [removal] getLatestResult() in PhotonCamera has been deprecated and marked for removal
+            
+            // In newer PhotonLib, we should often use:
+            // for (var result : camera.getAllUnreadResults()) { ... }
+            // But that changes the logic significantly (processing queue vs latest).
+            // For this subsystem which wants the *latest* state for drive control, getLatestResult() is logically correct
+            // even if deprecated. The replacement is likely getting the whole list and taking the last one.
+            
+            List<PhotonPipelineResult> results = camera.getAllUnreadResults();
+            if (results.isEmpty()) {
+                return;
+            }
+            PhotonPipelineResult result = results.get(results.size() - 1);
             
             // OPTIMIZATION: Only process if we have a new result (avoid unnecessary work)
             if (result.getTimestampSeconds() != latestResult.getTimestampSeconds()) {
+                boolean wasConnected = cameraConnected;
                 latestResult = result;
                 lastResultTimestamp = Timer.getFPGATimestamp();
                 cameraConnected = true;
                 consecutiveFailures = 0;
                 frameCount++;
+
+                if (!wasConnected) {
+                    logVisionEvents.append("Camera Connected");
+                }
                 
-                // OPTIMIZATION: Removed expensive stream operations from hot path
-                // Latency tracking moved to telemetry update (throttled)
+                // Log direct metrics that might be throttled in SmartDashboard
+                logHasTargets.append(result.hasTargets());
+                // Calculate total system latency (capture to now) in ms
+                double totalLatencyMs = (Timer.getFPGATimestamp() - result.getTimestampSeconds()) * 1000.0;
+                logTargetLatency.append(totalLatencyMs);
             }
         } catch (Exception e) {
             consecutiveFailures++;
@@ -387,12 +462,15 @@ public class VisionSubsystem extends SubsystemBase {
     private void monitorHealth() {
         // Update connection status based on recent data
         if (Timer.getFPGATimestamp() - lastResultTimestamp > 2.0) {
+            if (cameraConnected) {
+                logVisionEvents.append("Camera Disconnected (Timeout)");
+            }
             cameraConnected = false;
         }
         
         // Log warnings for poor connection
-        if (consecutiveFailures > 10) {
-            System.err.println("[VisionSubsystem] Warning: " + consecutiveFailures + " consecutive camera failures");
+        if (consecutiveFailures > 10 && consecutiveFailures % 50 == 0) {
+            logVisionEvents.append("Warning: " + consecutiveFailures + " consecutive camera failures");
         }
     }
     
@@ -410,20 +488,20 @@ public class VisionSubsystem extends SubsystemBase {
      * OPTIMIZED: Throttled updates, cached strings, minimal SmartDashboard calls.
      */
     private void updateTelemetry() {
-        // OPTIMIZATION: Batch SmartDashboard updates and cache expensive operations
+        // OPTIMIZATION: Batch updates and cache expensive operations
         // Connection status (fast)
         boolean connected = isCameraConnected();
-        SmartDashboard.putBoolean("Vision/Connected", connected);
-        SmartDashboard.putNumber("Vision/Consecutive Failures", consecutiveFailures);
+        connectedEntry.setBoolean(connected);
+        failuresEntry.setInteger(consecutiveFailures);
         
         // Target information (fast)
         boolean hasTargets = hasTargets();
         int targetCount = hasTargets ? latestResult.getTargets().size() : 0;
-        SmartDashboard.putBoolean("Vision/Has Targets", hasTargets);
-        SmartDashboard.putNumber("Vision/Target Count", targetCount);
+        hasTargetsEntry.setBoolean(hasTargets);
+        targetCountEntry.setInteger(targetCount);
         
         // Performance metrics (fast)
-        SmartDashboard.putNumber("Vision/Frame Count", frameCount);
+        frameCountEntry.setInteger(frameCount);
         
         // OPTIMIZATION: Only update pose string if it changed
         if (latestEstimatedPose.isPresent()) {
@@ -437,14 +515,14 @@ public class VisionSubsystem extends SubsystemBase {
                     pose.getX(), pose.getY(), pose.getRotation().getDegrees());
                 cachedTagsUsed = tagsUsed;
             }
-            SmartDashboard.putString("Vision/Estimated Pose", cachedPoseString);
-            SmartDashboard.putNumber("Vision/Tags Used", cachedTagsUsed);
+            estimatedPoseEntry.setString(cachedPoseString);
+            tagsUsedEntry.setInteger(cachedTagsUsed);
         } else {
             if (!cachedPoseString.equals("None")) {
                 cachedPoseString = "None";
                 cachedTagsUsed = 0;
-                SmartDashboard.putString("Vision/Estimated Pose", cachedPoseString);
-                SmartDashboard.putNumber("Vision/Tags Used", 0);
+                estimatedPoseEntry.setString(cachedPoseString);
+                tagsUsedEntry.setInteger(0);
             }
         }
         
@@ -455,20 +533,16 @@ public class VisionSubsystem extends SubsystemBase {
             int targetId = target.getFiducialId();
             if (targetId != cachedBestTargetId) {
                 cachedBestTargetId = targetId;
-                SmartDashboard.putNumber("Vision/Best Target ID", targetId);
-                SmartDashboard.putNumber("Vision/Best Target Ambiguity", target.getPoseAmbiguity());
-                SmartDashboard.putNumber("Vision/Best Target Area", target.getArea());
+                bestTargetIdEntry.setInteger(targetId);
+                bestTargetAmbiguityEntry.setDouble(target.getPoseAmbiguity());
+                bestTargetAreaEntry.setDouble(target.getArea());
             }
         } else {
             if (cachedBestTargetId != -1) {
                 cachedBestTargetId = -1;
-                SmartDashboard.putNumber("Vision/Best Target ID", -1);
+                bestTargetIdEntry.setInteger(-1);
             }
         }
-        
-        // OPTIMIZATION: Static string, only set once
-        // Note: This could be moved to constructor, but keeping here for now
-        // SmartDashboard.putString("Vision/PhotonVision Dashboard", "http://192.168.86.30:5800/#/camera");
     }
     
     /**
@@ -477,6 +551,11 @@ public class VisionSubsystem extends SubsystemBase {
      * @param estimate The pose estimate to log
      */
     private void logPoseEstimate(EstimatedRobotPose estimate) {
+        // Always log to DataLog for analysis, even if console debug is off
+        logPoseX.append(estimate.estimatedPose.getX());
+        logPoseY.append(estimate.estimatedPose.getY());
+        logPoseTheta.append(estimate.estimatedPose.getRotation().getZ());
+
         if (Constants.Logging.DEBUG_ENABLED) {
             System.out.println(String.format(
                 "[VisionSubsystem] Pose estimate: (%.3f, %.3f, %.1f°) using %d tags",
