@@ -58,11 +58,11 @@ public class Robot extends TimedRobot {
             
             // Set up the connection to your PhotonVision camera
             // This allows the simulation to connect to the camera on your robot's network
-            ntInstance.startClient4("MinBot2_Simulation");
+            ntInstance.startClient4("MainBOT_Simulation");
             ntInstance.setServer("192.168.86.30", 10000); // PhotonVision default port
             
             // Enable verbose logging for debugging
-            ntInstance.setServerTeam(5432); // Your team number
+            ntInstance.setServerTeam(1334); // Your team number
             ntInstance.startDSClient();
             
             System.out.println("[Robot] NetworkTables configured to connect to PhotonVision camera at 192.168.86.30");
@@ -151,7 +151,8 @@ public class Robot extends TimedRobot {
         m_autonomousCommand = m_robotContainer.getAutonomousCommand();
         
         if (m_autonomousCommand != null) {
-            m_autonomousCommand.schedule();
+            // Command.schedule() is deprecated, use CommandScheduler.getInstance().schedule(Command)
+            CommandScheduler.getInstance().schedule(m_autonomousCommand);
         }
     }
 

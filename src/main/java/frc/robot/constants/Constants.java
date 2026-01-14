@@ -18,6 +18,25 @@ public final class Constants {
     // ROBOT PHYSICAL PROPERTIES
     // ==========================================================================
     
+    // ==========================================================================
+    // SAFETY AND TESTING FLAGS
+    // ==========================================================================
+    
+    public static final class Safety {
+        /** 
+         * GLOBAL SAFETY TEST FLAG
+         * Set to TRUE when robot is on blocks or in early testing.
+         * Set to FALSE for competition/field driving.
+         */
+        public static final boolean SAFETY_TESTING_MODE = false;
+        
+        /** Max speed when in testing mode (m/s) */
+        public static final double TEST_MAX_SPEED = 0.5;
+        
+        /** Max rotation when in testing mode (rad/s) */
+        public static final double TEST_MAX_ROTATION = Math.PI; // 180 deg/s
+    }
+
     public static final class Robot {
         /** Robot loop period in seconds */
         public static final double LOOP_PERIOD_SECONDS = 0.02; // 50Hz

@@ -18,7 +18,13 @@ public final class PhotonVisionWrapper {
   public static Supplier<Optional<Pose2d>> tagPoseSupplier(String cameraName, int tagId) {
     final PhotonCamera cam = new PhotonCamera(cameraName);
     return () -> {
-      var res = cam.getLatestResult();
+      var allRes = cam.getAllUnreadResults();
+      if (allRes.isEmpty()) {
+          return Optional.empty();
+      }
+      
+      // Check the latest result from the list
+      var res = allRes.get(allRes.size() - 1);
       if (!res.hasTargets()) return Optional.empty();
       for (PhotonTrackedTarget t : res.getTargets()) {
         if (t.getFiducialId() == tagId) {

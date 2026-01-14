@@ -25,7 +25,7 @@ public final class AprilTagConstants {
      * Loaded once and cached for performance.
      */
     public static final AprilTagFieldLayout FIELD_LAYOUT = 
-            AprilTagFields.k2024Crescendo.loadAprilTagLayoutField();
+            AprilTagFieldLayout.loadField(AprilTagFields.k2024Crescendo);
 
     /**
      * The geometric center of the playing field.

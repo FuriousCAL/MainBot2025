@@ -32,6 +32,7 @@ import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
+import frc.robot.constants.Constants;
 
 /**
  * Class that extends the Phoenix 6 SwerveDrivetrain class and implements
@@ -51,6 +52,7 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private final GenericEntry poseXEntry;
     private final GenericEntry poseYEntry;
     private final GenericEntry poseRotEntry;
+    private final GenericEntry poseStringEntry; // New text box for easy reading
 
     /* Blue alliance sees forward as 0 degrees (toward red alliance wall) */
     private static final Rotation2d kBlueAlliancePerspectiveRotation = Rotation2d.kZero;
@@ -156,6 +158,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         poseXEntry = driveTab.add("Pose X", 0.0).getEntry();
         poseYEntry = driveTab.add("Pose Y", 0.0).getEntry();
         poseRotEntry = driveTab.add("Pose Rot", 0.0).getEntry();
+        
+        // Add formatted text box
+        poseStringEntry = driveTab.add("Current Pose", "Initializing...")
+            .withPosition(3, 0)
+            .withSize(2, 1) // Make it big enough to read
+            .getEntry();
 
         if (Utils.isSimulation()) {
             startSimThread();
@@ -200,6 +208,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         poseXEntry = driveTab.add("Pose X", 0.0).getEntry();
         poseYEntry = driveTab.add("Pose Y", 0.0).getEntry();
         poseRotEntry = driveTab.add("Pose Rot", 0.0).getEntry();
+        
+        // Add formatted text box
+        poseStringEntry = driveTab.add("Current Pose", "Initializing...")
+            .withPosition(3, 0)
+            .withSize(2, 1)
+            .getEntry();
 
         if (Utils.isSimulation()) {
             startSimThread();
@@ -230,17 +244,34 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     }
 
     public void driveRobotRelative(ChassisSpeeds speeds) {
+        // Apply clamps based on SAFETY_TESTING_MODE flag
+        double maxSpeed = Constants.Safety.SAFETY_TESTING_MODE ? 
+            Constants.Safety.TEST_MAX_SPEED : Constants.Drivetrain.MAX_VELOCITY_MPS;
+        double maxRot = Constants.Safety.SAFETY_TESTING_MODE ? 
+            Constants.Safety.TEST_MAX_ROTATION : Constants.Drivetrain.MAX_ANGULAR_VELOCITY_RADPS;
+            
+        double clampedVx = MathUtil.clamp(speeds.vxMetersPerSecond, -maxSpeed, maxSpeed);
+        double clampedVy = MathUtil.clamp(speeds.vyMetersPerSecond, -maxSpeed, maxSpeed);
+        double clampedOmega = MathUtil.clamp(speeds.omegaRadiansPerSecond, -maxRot, maxRot);
+        
         // Log velocity requests for debugging
         if (reqVelXEntry != null) { // Check null in case initialized differently (redundant safety)
-            reqVelXEntry.setDouble(speeds.vxMetersPerSecond);
-            reqVelYEntry.setDouble(speeds.vyMetersPerSecond);
-            reqAngRateEntry.setDouble(speeds.omegaRadiansPerSecond);
+            reqVelXEntry.setDouble(clampedVx);
+            reqVelYEntry.setDouble(clampedVy);
+            reqAngRateEntry.setDouble(clampedOmega);
         }
         
+        // Select DriveRequestType: Velocity for testing (safer), OpenLoop for match (responsive)
+        // Or keep Velocity if tuned well. Using switch based on flag for now.
+        var requestType = Constants.Safety.SAFETY_TESTING_MODE ? 
+            com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType.Velocity : 
+            com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType.OpenLoopVoltage;
+        
         var request = new SwerveRequest.RobotCentric()
-            .withVelocityX(speeds.vxMetersPerSecond)
-            .withVelocityY(speeds.vyMetersPerSecond)
-            .withRotationalRate(speeds.omegaRadiansPerSecond);
+            .withVelocityX(clampedVx)
+            .withVelocityY(clampedVy)
+            .withRotationalRate(clampedOmega)
+            .withDriveRequestType(requestType);
         this.setControl(request);
         
         // Log actual speeds after applying
@@ -319,12 +350,19 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         // Log drivetrain state for debugging
         var state = this.getState();
         if (poseXEntry != null) {
-            poseXEntry.setDouble(state.Pose.getX());
-            poseYEntry.setDouble(state.Pose.getY());
-            poseRotEntry.setDouble(state.Pose.getRotation().getDegrees());
+            double x = state.Pose.getX();
+            double y = state.Pose.getY();
+            double rot = state.Pose.getRotation().getDegrees();
+            
+            poseXEntry.setDouble(x);
+            poseYEntry.setDouble(y);
+            poseRotEntry.setDouble(rot);
             actVelXEntry.setDouble(state.Speeds.vxMetersPerSecond);
             actVelYEntry.setDouble(state.Speeds.vyMetersPerSecond);
             actAngRateEntry.setDouble(state.Speeds.omegaRadiansPerSecond);
+            
+            // Update formatted string (less frequent updates? No, string fmt is fast enough for <10 calls)
+            poseStringEntry.setString(String.format("(%.2f, %.2f) @ %.1f°", x, y, rot));
         }
     }
 

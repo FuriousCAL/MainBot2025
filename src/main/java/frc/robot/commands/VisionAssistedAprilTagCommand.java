@@ -13,6 +13,7 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.constants.AprilTagConstants;
+import frc.robot.constants.Constants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.VisionSubsystem;
 import frc.robot.utils.PathPlannerUtils;
@@ -22,6 +23,7 @@ import java.util.Optional;
 import org.photonvision.targeting.PhotonTrackedTarget;
 
 import com.pathplanner.lib.auto.AutoBuilder;
+import edu.wpi.first.wpilibj.DataLogManager;
 
 /**
  * Vision-Assisted AprilTag Navigation Command
@@ -47,11 +49,11 @@ public class VisionAssistedAprilTagCommand extends Command {
     /** Maximum pose ambiguity to accept for vision control */
     private static final double MAX_VISION_AMBIGUITY = 0.3;
     
-    /** Timeout for PathPlanner phase (seconds) */
-    private static final double PATHPLANNER_TIMEOUT = 10.0;
+    /** Timeout for PathPlanner phase (seconds) - Base value, scaled by Safety Mode */
+    private static final double PATHPLANNER_TIMEOUT_BASE = 10.0;
     
-    /** Timeout for vision precision phase (seconds) */
-    private static final double VISION_TIMEOUT = 5.0;
+    /** Timeout for vision precision phase (seconds) - Base value, scaled by Safety Mode */
+    private static final double VISION_TIMEOUT_BASE = 5.0;
     
     /** Position tolerance for completion (meters) */
     private static final double POSITION_TOLERANCE = 0.02;
@@ -81,6 +83,9 @@ public class VisionAssistedAprilTagCommand extends Command {
     private enum Phase { PATHPLANNER, VISION, FINISHED }
     private Phase currentPhase = Phase.PATHPLANNER;
     
+    // Telemetry throttling
+    private int telemetryCounter = 0;
+
     /** Command start time for timeout handling */
     private double commandStartTime;
     private double phaseStartTime;
@@ -175,15 +180,20 @@ public class VisionAssistedAprilTagCommand extends Command {
         double elapsedTime = currentTime - commandStartTime;
         double phaseElapsedTime = currentTime - phaseStartTime;
         
-        SmartDashboard.putNumber("VisionAssisted/Elapsed Time", elapsedTime);
-        SmartDashboard.putNumber("VisionAssisted/Phase Time", phaseElapsedTime);
+        // Update telemetry every 10 loops (5Hz) to prevent loop overruns
+        boolean updateTelemetry = (telemetryCounter++ % 10 == 0);
+        
+        if (updateTelemetry) {
+            SmartDashboard.putNumber("VisionAssisted/Elapsed Time", elapsedTime);
+            SmartDashboard.putNumber("VisionAssisted/Phase Time", phaseElapsedTime);
+        }
         
         switch (currentPhase) {
             case PATHPLANNER:
-                executePathPlannerPhase(phaseElapsedTime);
+                executePathPlannerPhase(phaseElapsedTime, updateTelemetry);
                 break;
             case VISION:
-                executeVisionPhase(phaseElapsedTime);
+                executeVisionPhase(phaseElapsedTime, updateTelemetry);
                 break;
             case FINISHED:
                 drivetrain.driveRobotRelative(new ChassisSpeeds(0, 0, 0));
@@ -193,8 +203,12 @@ public class VisionAssistedAprilTagCommand extends Command {
     
     @Override
     public boolean isFinished() {
-        // Safety timeout
-        if (Timer.getFPGATimestamp() - commandStartTime > (PATHPLANNER_TIMEOUT + VISION_TIMEOUT + 5.0)) {
+        // Safety timeout (Extended for SAFETY_TESTING_MODE)
+        double safetyMultiplier = Constants.Safety.SAFETY_TESTING_MODE ? 5.0 : 1.0;
+        double globalTimeout = (PATHPLANNER_TIMEOUT_BASE + VISION_TIMEOUT_BASE + 5.0) * safetyMultiplier;
+        
+        if (Timer.getFPGATimestamp() - commandStartTime > globalTimeout) {
+            DataLogManager.log("[VisionAssisted] Global timeout reached (Limit: " + globalTimeout + "s)");
             System.out.println("[VisionAssisted] Global timeout reached");
             return true;
         }
@@ -229,25 +243,33 @@ public class VisionAssistedAprilTagCommand extends Command {
     /**
      * Executes the PathPlanner coarse navigation phase.
      */
-    private void executePathPlannerPhase(double phaseElapsedTime) {
+    private void executePathPlannerPhase(double phaseElapsedTime, boolean updateTelemetry) {
         // Continue PathPlanner command
         if (pathPlannerCommand != null) {
             pathPlannerCommand.execute();
         }
         
+        // Calculate timeout based on mode
+        double timeout = PATHPLANNER_TIMEOUT_BASE * (Constants.Safety.SAFETY_TESTING_MODE ? 5.0 : 1.0);
+        
         // Check conditions to switch to vision control
         double distanceToTarget = getDistanceToTarget();
         boolean closeEnough = distanceToTarget < VISION_SWITCH_DISTANCE;
         boolean pathPlannerFinished = pathPlannerCommand != null && pathPlannerCommand.isFinished();
-        boolean pathPlannerTimeout = phaseElapsedTime > PATHPLANNER_TIMEOUT;
+        boolean pathPlannerTimeout = phaseElapsedTime > timeout;
         
-        SmartDashboard.putNumber("VisionAssisted/Distance to Target", distanceToTarget);
-        SmartDashboard.putBoolean("VisionAssisted/PathPlanner Finished", pathPlannerFinished);
+        if (updateTelemetry) {
+            SmartDashboard.putNumber("VisionAssisted/Distance to Target", distanceToTarget);
+            SmartDashboard.putBoolean("VisionAssisted/PathPlanner Finished", pathPlannerFinished);
+        }
         
         // Switch if we are close enough OR PathPlanner finished/timed out
-        // We switch even if vision target isn't visible yet - we will assume odometry is good enough
-        // until we pick up the tag
         if (closeEnough || pathPlannerFinished || pathPlannerTimeout) {
+            if (pathPlannerTimeout) {
+                DataLogManager.log("[VisionAssisted] PathPlanner phase timed out (" + timeout + "s), switching to Vision anyway");
+            } else if (closeEnough) { 
+                DataLogManager.log("[VisionAssisted] Close enough for Vision (" + distanceToTarget + "m)");
+            }
             switchToVisionPhase();
         }
     }
@@ -255,10 +277,12 @@ public class VisionAssistedAprilTagCommand extends Command {
     /**
      * Executes the vision-based precision control phase.
      */
-    private void executeVisionPhase(double phaseElapsedTime) {
+    private void executeVisionPhase(double phaseElapsedTime, boolean updateTelemetry) {
         // Check for vision timeout
-        if (phaseElapsedTime > VISION_TIMEOUT) {
+        double timeout = VISION_TIMEOUT_BASE * (Constants.Safety.SAFETY_TESTING_MODE ? 5.0 : 1.0);
+        if (phaseElapsedTime > timeout) {
             currentPhase = Phase.FINISHED;
+            DataLogManager.log("[VisionAssisted] Vision phase timed out after " + timeout + "s. Final Dist: " + getDistanceToTarget());
             SmartDashboard.putString("VisionAssisted/Status", "Vision phase timeout");
             return;
         }
@@ -279,8 +303,41 @@ public class VisionAssistedAprilTagCommand extends Command {
         
         // Distance-based speed scaling for smooth arrival
         double distance = currentPose.getTranslation().getDistance(finalTargetPose.getTranslation());
-        double speedScale = Math.min(1.0, distance / 0.5); // Scale down linearly within 0.5m
-        speedScale = Math.max(0.1, speedScale); // Minimum 10% speed to ensure we reach target
+        
+        // Use direct vision measurement if available for better close-range accuracy
+        if (visionSubsystem.isTagVisible(targetTagId)) {
+            var targetOpt = visionSubsystem.getBestTarget();
+            if (targetOpt.isPresent()) {
+                var target = targetOpt.get();
+                if (target.getFiducialId() == targetTagId) {
+                    // Vision gives us distance to the tag itself. 
+                    // Our target is TARGET_DISTANCE_METERS in front of it.
+                    double distanceToTag = target.getBestCameraToTarget().getTranslation().getNorm();
+                    double visionDistance = Math.max(0.0, distanceToTag - TARGET_DISTANCE_METERS);
+                    
+                    // Trust vision more when we are close (within 1.5m)
+                    if (distanceToTag < 1.5) {
+                        distance = visionDistance;
+                    }
+                }
+            }
+        }
+
+        // Drastic slowing profile (Quadratic)
+        // Start slowing at 2.0m (start of vision phase)
+        double slowDownRadius = 2.0;
+        double minSpeed = 0.15; // Minimum speed to overcome friction
+        double speedScale = 1.0;
+        
+        if (distance < slowDownRadius) {
+            // Quadratic curve: Drops off faster than linear
+            // 2.0m -> 100%
+            // 1.0m -> 25%
+            // 0.5m -> 6% (clamped to min)
+            speedScale = Math.pow(distance / slowDownRadius, 2);
+        }
+        
+        speedScale = Math.max(minSpeed, speedScale);
         
         // Limit maximum speeds for safety during precision control
         // Close range: slow down significantly
@@ -295,10 +352,12 @@ public class VisionAssistedAprilTagCommand extends Command {
         drivetrain.driveRobotRelative(chassisSpeeds);
         
         // Update telemetry
-        SmartDashboard.putNumber("VisionAssisted/Target X", finalTargetPose.getX());
-        SmartDashboard.putNumber("VisionAssisted/Target Y", finalTargetPose.getY());
-        SmartDashboard.putNumber("VisionAssisted/Target Rotation", finalTargetPose.getRotation().getDegrees());
-        SmartDashboard.putNumber("VisionAssisted/Current Distance", distance);
+        if (updateTelemetry) {
+            SmartDashboard.putNumber("VisionAssisted/Target X", finalTargetPose.getX());
+            SmartDashboard.putNumber("VisionAssisted/Target Y", finalTargetPose.getY());
+            SmartDashboard.putNumber("VisionAssisted/Target Rotation", finalTargetPose.getRotation().getDegrees());
+            SmartDashboard.putNumber("VisionAssisted/Current Distance", distance);
+        }
         
         // Check if we're at the target
         if (visionController.atReference()) {

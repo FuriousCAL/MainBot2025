@@ -17,6 +17,7 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 
 import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.auto.NamedCommands;
 import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 import com.pathplanner.lib.config.PIDConstants;
@@ -27,6 +28,7 @@ import frc.robot.commands.DriveToHomeCommand;
 import frc.robot.commands.SimpleAutonomousCommand;
 import frc.robot.commands.VisionAssistedAprilTagCommand;
 import frc.robot.constants.AprilTagConstants;
+import frc.robot.constants.Constants;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.VisionSubsystem;
@@ -42,13 +44,19 @@ import frc.robot.StartPosition;
 
 
 public class RobotContainer {
-  private final double MaxSpeed = TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
-  private final double MaxAngularRate = RotationsPerSecond.of(0.40).in(RadiansPerSecond);
+  // Speed configuration based on SAFETY_TESTING_MODE flag
+  private final double MaxSpeed = Constants.Safety.SAFETY_TESTING_MODE ? 
+      Constants.Safety.TEST_MAX_SPEED : TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
+      
+  private final double MaxAngularRate = Constants.Safety.SAFETY_TESTING_MODE ? 
+      RotationsPerSecond.of(0.1).in(RadiansPerSecond) : RotationsPerSecond.of(0.40).in(RadiansPerSecond);
 
   private final SwerveRequest.RobotCentric drive = new SwerveRequest.RobotCentric()
       .withDeadband(MaxSpeed * 0.1)
       .withRotationalDeadband(MaxAngularRate * 0.1)
-      .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+      .withDriveRequestType(Constants.Safety.SAFETY_TESTING_MODE ? 
+          DriveRequestType.Velocity : DriveRequestType.OpenLoopVoltage);
+          
   private final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
   private final SwerveRequest.PointWheelsAt point = new SwerveRequest.PointWheelsAt();
   
@@ -56,7 +64,8 @@ public class RobotContainer {
   private final SwerveRequest.FieldCentric fieldDrive = new SwerveRequest.FieldCentric()
     .withDeadband(MaxSpeed * 0.1)
     .withRotationalDeadband(MaxAngularRate * 0.1)
-    .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
+    .withDriveRequestType(Constants.Safety.SAFETY_TESTING_MODE ? 
+          DriveRequestType.Velocity : DriveRequestType.OpenLoopVoltage);
 
   // Start in field-centric; LB will toggle this
   private boolean isFieldCentric = true;
@@ -107,6 +116,11 @@ public class RobotContainer {
         double precision = 1.0 - 0.7 * joystick.getLeftTriggerAxis();  // 1.0 → 0.3
         double turbo     = 1.0 + 0.5 * joystick.getRightTriggerAxis(); // 1.0 → 1.5
         double scale     = MathUtil.clamp(precision * turbo, 0.2, 1.5);
+        
+        // If in safe mode, disable turbo/precision scaling to keep things predictable
+        if (Constants.Safety.SAFETY_TESTING_MODE) {
+            scale = 1.0;
+        }
 
         // Call the concrete request type (avoid the NativeSwerveRequest parent)
         double rightX = joystick.getRightX();
@@ -336,26 +350,60 @@ public class RobotContainer {
     // NOTE: This uses the SAFE_POSE constant directly, not the Shuffleboard-selected start pose
     joystick.y().onTrue(new DriveToHomeCommand(drivetrain));
     
-    // Start Button: Vision system test (drive to AprilTag 2 with simple PID)
-    joystick.start().onTrue(new DriveToAprilTag2Command(drivetrain, visionSubsystem));
+    // Start Button: Velocity Test (Fixed 0.5 m/s forward)
+    // Uses Closed Loop Velocity Control to ensure safe, consistent speed on blocks
+    joystick.start().whileTrue(drivetrain.applyRequest(() -> 
+        new SwerveRequest.RobotCentric()
+            .withVelocityX(0.5) // 0.5 m/s forward
+            .withVelocityY(0.0)
+            .withRotationalRate(0.0)
+            .withDriveRequestType(DriveRequestType.Velocity)
+    ));
     
     // Back Button: Emergency home (backup safety)
     joystick.back().onTrue(new DriveToHomeCommand(drivetrain));
 
     // === D-PAD: QUICK NAVIGATION (Optional) ===
-    // D-pad Down: Vision test (same as Start)
-    joystick.povDown().onTrue(new DriveToAprilTag2Command(drivetrain, visionSubsystem));
+    // D-Pad Down: Drive to ALL points (Amp -> Speaker -> Source)
+    joystick.povDown().onTrue(Commands.defer(() -> {
+        var alliance = DriverStation.getAlliance();
+        boolean isRed = alliance.isPresent() && alliance.get() == Alliance.Red;
+        
+        // Define tag IDs based on alliance
+        int ampId = isRed ? 5 : 6;
+        int speakerId = isRed ? 4 : 7;
+        int sourceId = isRed ? 10 : 1;
+        
+        return Commands.sequence(
+            // 1. Go to Amp
+            new VisionAssistedAprilTagCommand(drivetrain, visionSubsystem, ampId),
+            Commands.waitSeconds(0.5),
+            
+            // 2. Go to Speaker
+            new VisionAssistedAprilTagCommand(drivetrain, visionSubsystem, speakerId),
+            Commands.waitSeconds(0.5),
+            
+            // 3. Go to Source
+            new VisionAssistedAprilTagCommand(drivetrain, visionSubsystem, sourceId)
+        );
+    }, Set.of(drivetrain, visionSubsystem)));
 
     System.out.println("[Controller] Professional FRC team layout loaded");
     System.out.println("  Core: LB=Toggle Mode, RB=Brake, A=Cancel, B=Point, Y=Home");
     System.out.println("  Vision: X+Y=Tag2, X+B=Tag1, Y+B=Tag3, X+A=Tag4");
-    System.out.println("  Red/Blue: POV-Up=Speaker, POV-Left=Amp, POV-Right=Source");
+    System.out.println("  Red/Blue: POV-Up=Speaker, POV-Left=Amp, POV-Right=Source, POV-Down=ALL POINTS");
     System.out.println("  Safety: Start=Vision Test, Back=Emergency Home");
     System.out.println("  Rotation: Left stick = CCW, Right stick = CW");
   }
 
 
   private void configurePathPlanner() {
+    // Register NamedCommands to prevent runtime errors
+    NamedCommands.registerCommand("ElevatorL1", Commands.print("ElevatorL1 command not implemented"));
+    NamedCommands.registerCommand("Shoot", Commands.print("Shoot command not implemented"));
+    NamedCommands.registerCommand("ElevatorBottom", Commands.print("ElevatorBottom command not implemented"));
+    NamedCommands.registerCommand("ElevatorFeed", Commands.print("ElevatorFeed command not implemented"));
+
     RobotConfig cfg;
     try {
         cfg = RobotConfig.fromGUISettings();
@@ -402,57 +450,32 @@ public class RobotContainer {
 
   private void populateAutoChooser() {
     autoChooser.setDefaultOption("Do Nothing", Commands.none());
-    autoChooser.addOption("Drive Forward 2s", SimpleAutonomousCommand.driveForward(drivetrain, 2.0));
-    autoChooser.addOption("Spin In Place 2s", SimpleAutonomousCommand.spinInPlace(drivetrain, 2.0));
-    autoChooser.addOption("Square Pattern", SimpleAutonomousCommand.squarePattern(drivetrain));
-    autoChooser.addOption("PathPlanner: TestAuto1", AutoBuilder.buildAuto("TestAuto1"));
-    autoChooser.addOption(
-      "PathPlanner: Simple Test",
-      Commands.sequence(
-          Commands.print("PathPlanner: Starting simple test"),
-          Commands.runOnce(() -> {
-              System.out.println("[PathPlanner] Current pose: " + drivetrain.getPose());
-              System.out.println("[PathPlanner] Robot config loaded: " + (AutoBuilder.isConfigured() ? "YES" : "NO"));
-          }),
-          Commands.waitSeconds(1.0),
-          Commands.print("PathPlanner: Simple test complete")
-      )
-    );
+    
+    // PathPlanner: Standard Test Auto (Fixed Path)
+    // NOTE: Speed limited to 0.5 m/s in TestPath1.path
+    try {
+        autoChooser.addOption("PathPlanner: TestAuto1", AutoBuilder.buildAuto("TestAuto1"));
+    } catch (Exception e) {
+        System.err.println("Could not load TestAuto1: " + e.getMessage());
+    }
 
     // ============================================================================
-    // VISION TEST AUTONOMOUS COMMANDS
+    // VISION TEST AUTONOMOUS COMMANDS (Adaptive with Slowing)
     // ============================================================================
-    // Tag 2 Tests (PathPlanner with distance offset)
-    autoChooser.addOption("Vision Test: Tag 2 (0.5m)", 
-        new DriveToAprilTagOffsetCommand(drivetrain, 2, 0.5));
-    autoChooser.addOption("Vision Test: Tag 2 (1.0m)", 
-        new DriveToAprilTagOffsetCommand(drivetrain, 2, 1.0));
-    autoChooser.addOption("Vision Test: Tag 2 (1.5m)", 
-        new DriveToAprilTagOffsetCommand(drivetrain, 2, 1.5));
-    autoChooser.addOption("Vision Test: Tag 2 (2.0m)", 
-        new DriveToAprilTagOffsetCommand(drivetrain, 2, 2.0));
+    // Key tags for testing: Speaker (2), Source (N/A?), Amp? 
+    // We'll expose Tag 2 (Speaker), Tag 3 (Speaker-side), Tag 4 (Source-side) 
+    // These use VisionAssistedAprilTagCommand which includes the drastic slowing logic
     
-    // Tag 3 Tests (PathPlanner with distance offset)
-    autoChooser.addOption("Vision Test: Tag 3 (0.5m)", 
-        new DriveToAprilTagOffsetCommand(drivetrain, 3, 0.5));
-    autoChooser.addOption("Vision Test: Tag 3 (1.0m)", 
-        new DriveToAprilTagOffsetCommand(drivetrain, 3, 1.0));
-    autoChooser.addOption("Vision Test: Tag 3 (1.5m)", 
-        new DriveToAprilTagOffsetCommand(drivetrain, 3, 1.5));
-    autoChooser.addOption("Vision Test: Tag 3 (2.0m)", 
-        new DriveToAprilTagOffsetCommand(drivetrain, 3, 2.0));
-    
-    // Vision-Assisted Tests (two-phase: PathPlanner + Vision precision)
-    autoChooser.addOption("Vision Test: Tag 2 (Vision-Assisted)", 
+    autoChooser.addOption("Vision Test: Tag 2 (Speaker)", 
         new VisionAssistedAprilTagCommand(drivetrain, visionSubsystem, 2));
-    autoChooser.addOption("Vision Test: Tag 3 (Vision-Assisted)", 
+        
+    autoChooser.addOption("Vision Test: Tag 3 (Speaker Side)", 
         new VisionAssistedAprilTagCommand(drivetrain, visionSubsystem, 3));
-    
-    // Simple PID Tests (for comparison)
-    autoChooser.addOption("Vision Test: Tag 2 (Simple PID)", 
-        new DriveToAprilTag2Command(drivetrain, visionSubsystem));
+        
+    autoChooser.addOption("Vision Test: Tag 4 (Source Side)", 
+        new VisionAssistedAprilTagCommand(drivetrain, visionSubsystem, 4));
 
-    System.out.println("[AutoChooser] Added vision test autonomous commands");
+    System.out.println("[AutoChooser] Configured for safe block testing");
   }
 
   public Command getAutonomousCommand() {
